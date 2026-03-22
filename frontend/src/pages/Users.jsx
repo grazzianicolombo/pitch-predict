@@ -10,7 +10,7 @@ export default function Users() {
   const [users, setUsers]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm]         = useState({ name: '', email: '', password: '', role: 'user' })
+  const [form, setForm]         = useState({ name: '', email: '', role: 'user' })
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState('')
 
@@ -39,7 +39,7 @@ export default function Users() {
     setError('')
     try {
       await api.post('/auth/users', form)
-      setForm({ name: '', email: '', password: '', role: 'user' })
+      setForm({ name: '', email: '', role: 'user' })
       setShowForm(false)
       load()
     } catch (err) {
@@ -84,9 +84,8 @@ export default function Users() {
               <label style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>EMAIL</label>
               <input className="input" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required placeholder="email@empresa.com" style={{ width: '100%', marginTop: 4 }} />
             </div>
-            <div>
-              <label style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>SENHA INICIAL</label>
-              <input className="input" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required placeholder="mínimo 8 caracteres" style={{ width: '100%', marginTop: 4 }} />
+            <div style={{ gridColumn: '1/-1', padding: '10px 14px', background: '#F0F9FF', borderRadius: 8, border: '1px solid #BAE6FD', fontSize: 12, color: '#0369A1' }}>
+              📧 Um email de convite será enviado para o usuário definir sua própria senha.
             </div>
             <div>
               <label style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>NÍVEL DE ACESSO</label>

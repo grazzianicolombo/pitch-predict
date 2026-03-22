@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Brands from './pages/Brands'
@@ -12,6 +13,8 @@ import Archive from './pages/Archive'
 import Predictions from './pages/Predictions'
 import Login from './pages/Login'
 import Users from './pages/Users'
+import AuthCallback from './pages/AuthCallback'
+import api from './services/api'
 import './App.css'
 
 const NAV_BASE = [
@@ -67,10 +70,69 @@ const routeMeta = {
   '/users':       { section: 'Administração',label: 'Usuários' },
 }
 
+function ChangePasswordModal({ onClose }) {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm]   = useState('')
+  const [saving, setSaving]     = useState(false)
+  const [msg, setMsg]           = useState('')
+  const [ok, setOk]             = useState(false)
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (password.length < 8) { setMsg('Mínimo 8 caracteres.'); return }
+    if (password !== confirm) { setMsg('As senhas não coincidem.'); return }
+    setSaving(true); setMsg('')
+    try {
+      await api.post('/auth/change-password', { password })
+      setOk(true)
+    } catch (err) {
+      setMsg(err?.response?.data?.error || 'Erro ao alterar senha.')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal modal-sm">
+        <h2 className="modal-title">Alterar senha</h2>
+        {ok ? (
+          <>
+            <p style={{ fontSize: 13, color: '#16A34A', textAlign: 'center', margin: '16px 0' }}>
+              ✅ Senha alterada com sucesso!
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-primary" onClick={onClose}>Fechar</button>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <div className="field" style={{ marginTop: 4 }}>
+              <label className="field-label">NOVA SENHA</label>
+              <input className="field-input" type="password" value={password}
+                onChange={e => setPassword(e.target.value)} placeholder="mínimo 8 caracteres" required />
+            </div>
+            <div className="field">
+              <label className="field-label">CONFIRMAR SENHA</label>
+              <input className="field-input" type="password" value={confirm}
+                onChange={e => setConfirm(e.target.value)} placeholder="repita a nova senha" required />
+            </div>
+            {msg && <p style={{ fontSize: 12, color: '#DC2626', margin: '8px 0' }}>{msg}</p>}
+            <div className="modal-actions">
+              <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+              <button type="submit" className="btn btn-primary" disabled={saving}>
+                {saving ? 'Salvando…' : 'Alterar senha'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function Topbar() {
   const { pathname } = useLocation()
   const { user, logout, isSuperadmin } = useAuth()
   const meta = routeMeta[pathname] || { section: '—', label: '—' }
+  const [showChangePwd, setShowChangePwd] = useState(false)
 
   return (
     <div className="topbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -79,6 +141,7 @@ function Topbar() {
         <span className="breadcrumb-sep">/</span>
         <span className="breadcrumb-current">{meta.label}</span>
       </div>
+      {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
       {user && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
@@ -92,6 +155,16 @@ function Topbar() {
               {isSuperadmin ? 'SUPERADMIN' : 'USUÁRIO'}
             </span>
           </span>
+          <button
+            onClick={() => setShowChangePwd(true)}
+            style={{
+              fontSize: 12, padding: '5px 12px', borderRadius: 6,
+              border: '1px solid var(--border)', background: 'transparent',
+              color: 'var(--text-dim)', cursor: 'pointer',
+            }}
+          >
+            Alterar senha
+          </button>
           <button
             onClick={logout}
             style={{
@@ -190,6 +263,7 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/*" element={
             <ProtectedRoute>
               <AppLayout />

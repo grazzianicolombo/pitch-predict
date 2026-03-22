@@ -1,14 +1,19 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import api from '../services/api'
 
 export default function Login() {
-  const { login }           = useAuth()
-  const navigate            = useNavigate()
-  const [email, setEmail]   = useState('')
-  const [pass, setPass]     = useState('')
-  const [error, setError]   = useState('')
-  const [loading, setLoad]  = useState(false)
+  const { login }              = useAuth()
+  const navigate               = useNavigate()
+  const [email, setEmail]      = useState('')
+  const [pass, setPass]        = useState('')
+  const [error, setError]      = useState('')
+  const [loading, setLoad]     = useState(false)
+  const [forgotMode, setForgot] = useState(false)
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotMsg, setForgotMsg]     = useState('')
+  const [forgotSending, setForgotSending] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -21,6 +26,20 @@ export default function Login() {
       setError(err?.response?.data?.error || 'Email ou senha incorretos')
     } finally {
       setLoad(false)
+    }
+  }
+
+  async function handleForgot(e) {
+    e.preventDefault()
+    setForgotSending(true)
+    setForgotMsg('')
+    try {
+      await api.post('/auth/forgot-password', { email: forgotEmail })
+      setForgotMsg('Se este email estiver cadastrado, você receberá um link em breve. Verifique sua caixa de entrada.')
+    } catch {
+      setForgotMsg('Erro ao enviar. Tente novamente.')
+    } finally {
+      setForgotSending(false)
     }
   }
 
@@ -55,7 +74,57 @@ export default function Login() {
           </p>
         </div>
 
-        {/* Form */}
+        {/* Modo: esqueci minha senha */}
+        {forgotMode ? (
+          <form onSubmit={handleForgot}>
+            <p style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 20, textAlign: 'center' }}>
+              Informe seu email e enviaremos um link para redefinir sua senha.
+            </p>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: 6 }}>
+                EMAIL
+              </label>
+              <input
+                type="email"
+                value={forgotEmail}
+                onChange={e => setForgotEmail(e.target.value)}
+                placeholder="seu@email.com"
+                required
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: 8,
+                  border: '1px solid var(--border)', background: 'var(--bg)',
+                  color: 'var(--text)', fontSize: 14, boxSizing: 'border-box',
+                }}
+              />
+            </div>
+            {forgotMsg && (
+              <div style={{
+                background: forgotMsg.startsWith('Erro') ? '#FEF2F2' : '#F0FDF4',
+                border: `1px solid ${forgotMsg.startsWith('Erro') ? '#FECACA' : '#BBF7D0'}`,
+                borderRadius: 8, padding: '10px 14px', marginBottom: 16,
+                fontSize: 13, color: forgotMsg.startsWith('Erro') ? '#DC2626' : '#16A34A',
+              }}>
+                {forgotMsg}
+              </div>
+            )}
+            <button type="submit" disabled={forgotSending} style={{
+              width: '100%', padding: '12px', borderRadius: 8, border: 'none',
+              background: forgotSending ? '#93C5FD' : 'linear-gradient(135deg, #2563EB, #7C3AED)',
+              color: '#fff', fontSize: 14, fontWeight: 700, cursor: forgotSending ? 'not-allowed' : 'pointer',
+              marginBottom: 12,
+            }}>
+              {forgotSending ? 'Enviando…' : 'Enviar link de acesso'}
+            </button>
+            <button type="button" onClick={() => { setForgot(false); setForgotMsg('') }} style={{
+              width: '100%', padding: '10px', borderRadius: 8,
+              border: '1px solid var(--border)', background: 'transparent',
+              color: 'var(--text-dim)', fontSize: 13, cursor: 'pointer',
+            }}>
+              ← Voltar ao login
+            </button>
+          </form>
+        ) : (
+        /* Form */
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', display: 'block', marginBottom: 6 }}>
@@ -117,7 +186,22 @@ export default function Login() {
           >
             {loading ? 'Entrando…' : 'Entrar'}
           </button>
+
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <button
+              type="button"
+              onClick={() => { setForgot(true); setForgotEmail(email); setError('') }}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 13, color: 'var(--text-dim)',
+                textDecoration: 'underline',
+              }}
+            >
+              Esqueci minha senha
+            </button>
+          </div>
         </form>
+        )}
       </div>
     </div>
   )

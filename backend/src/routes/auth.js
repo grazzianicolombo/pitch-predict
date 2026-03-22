@@ -87,22 +87,23 @@ router.get('/users', requireAuth, requireRole('superadmin'), async (req, res) =>
   res.json(data)
 })
 
-// ─── Cria usuário (superadmin) ───────────────────────────────────────────────
+// ─── Cria usuário via convite por email (superadmin) ─────────────────────────
 
 router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) => {
-  const { name, email, password, role = 'user' } = req.body
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'name, email e password obrigatórios' })
+  const { name, email, role = 'user' } = req.body
+  if (!name || !email) {
+    return res.status(400).json({ error: 'name e email obrigatórios' })
   }
   if (!['superadmin', 'user'].includes(role)) {
     return res.status(400).json({ error: 'role inválido' })
   }
 
-  // Cria no Supabase Auth
-  const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
+  const FRONTEND = process.env.FRONTEND_URL || 'https://pitch-predict.vercel.app'
+
+  // Envia convite por email (usuário define a própria senha ao clicar no link)
+  const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+    redirectTo: `${FRONTEND}/auth/callback`,
+    data: { name },
   })
   if (authErr) return res.status(400).json({ error: authErr.message })
 
@@ -116,11 +117,67 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
   if (profErr) return res.status(500).json({ error: profErr.message })
 
   res.status(201).json({
-    id:    profile.id,
-    name:  profile.name,
-    email: profile.email,
-    role:  profile.role,
+    id:      profile.id,
+    name:    profile.name,
+    email:   profile.email,
+    role:    profile.role,
+    invited: true,
   })
+})
+
+// ─── Define senha via token do email (convite / reset) ────────────────────────
+
+router.post('/set-password', async (req, res) => {
+  const { token, password } = req.body
+  if (!token || !password || password.length < 8) {
+    return res.status(400).json({ error: 'Token e senha (mín. 8 caracteres) obrigatórios' })
+  }
+
+  // Valida o token e obtém o usuário
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token)
+  if (error || !user) return res.status(401).json({ error: 'Link inválido ou expirado' })
+
+  // Atualiza a senha
+  const { error: updErr } = await supabaseAdmin.auth.admin.updateUserById(user.id, { password })
+  if (updErr) return res.status(500).json({ error: updErr.message })
+
+  // Garante que o perfil existe e está ativo
+  await supabaseAdmin
+    .from('user_profiles')
+    .update({ active: true })
+    .eq('user_id', user.id)
+
+  res.json({ ok: true, message: 'Senha definida com sucesso' })
+})
+
+// ─── Esqueci minha senha ──────────────────────────────────────────────────────
+
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body
+  if (!email) return res.status(400).json({ error: 'Email obrigatório' })
+
+  const FRONTEND = process.env.FRONTEND_URL || 'https://pitch-predict.vercel.app'
+
+  // Sempre retorna ok (não revela se o email existe)
+  await supabaseAdmin.auth.resetPasswordForEmail(email, {
+    redirectTo: `${FRONTEND}/auth/callback`,
+  })
+
+  res.json({ ok: true, message: 'Se este email estiver cadastrado, você receberá um link em breve.' })
+})
+
+// ─── Alterar senha (usuário logado) ──────────────────────────────────────────
+
+router.post('/change-password', requireAuth, async (req, res) => {
+  const { password } = req.body
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: 'Nova senha deve ter mínimo 8 caracteres' })
+  }
+
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(req.user.id, { password })
+  if (error) return res.status(500).json({ error: error.message })
+
+  res.json({ ok: true, message: 'Senha alterada com sucesso' })
 })
 
 // ─── Atualiza role/status (superadmin) ───────────────────────────────────────
