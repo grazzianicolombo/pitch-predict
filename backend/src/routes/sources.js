@@ -221,7 +221,7 @@ router.post('/upload-scopen', upload.single('pdf'), async (req, res) => {
   await supabase.from('source_jobs').update({
     last_run_at:     new Date().toISOString(),
     last_run_status: 'ok',
-    config:          { last_file: destName, original_name: origName },
+    config:          { last_file: destName, original_name: req.file.originalname },
     updated_at:      new Date().toISOString(),
   }).eq('source_id', 'scopen')
 
