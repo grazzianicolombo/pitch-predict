@@ -10,6 +10,7 @@ export default function Login() {
   const [pass, setPass]        = useState('')
   const [error, setError]      = useState('')
   const [loading, setLoad]     = useState(false)
+  const [remember, setRemember] = useState(true)
   const [forgotMode, setForgot] = useState(false)
   const [forgotEmail, setForgotEmail] = useState('')
   const [forgotMsg, setForgotMsg]     = useState('')
@@ -20,7 +21,7 @@ export default function Login() {
     setError('')
     setLoad(true)
     try {
-      await login(email, pass)
+      await login(email, pass, remember)
       navigate('/')
     } catch (err) {
       setError(err?.response?.data?.error || 'Email ou senha incorretos')
@@ -162,6 +163,19 @@ export default function Login() {
                 outline: 'none',
               }}
             />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+            <input
+              id="remember"
+              type="checkbox"
+              checked={remember}
+              onChange={e => setRemember(e.target.checked)}
+              style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#2563EB' }}
+            />
+            <label htmlFor="remember" style={{ fontSize: 13, color: 'var(--text-dim)', cursor: 'pointer', userSelect: 'none' }}>
+              Lembrar por 30 dias
+            </label>
           </div>
 
           {error && (
