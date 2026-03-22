@@ -20,14 +20,20 @@ const { search } = require('../lib/tavilySearch')
 
 const client = new Anthropic()
 
-const DAYS_LOOKBACK         = 90
+const DAYS_LOOKBACK         = 120
+const DAYS_LOOKBACK_FALLBACK = 365  // para marcas sem notícias recentes
 const SEARCH_DOMAINS        = [
   'meioemensagem.com.br',
   'propmark.com.br',
   'adnews.com.br',
+  'portaldapropaganda.com.br',
+  'brainstorm9.com.br',
   'valor.com.br',
   'exame.com',
-  'portaldapropaganda.com.br',
+  'forbes.com.br',
+  'infomoney.com.br',
+  'istoedinheiro.com.br',
+  'mundodomarketing.com.br',
 ]
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
@@ -51,13 +57,20 @@ async function loadBrandsWithActiveAgencies(limit = 50) {
     byBrand[h.brand_id].push(h)
   }
 
-  const brandIds = Object.keys(byBrand).slice(0, limit)
+  const brandIds = Object.keys(byBrand)
   const { data: brands } = await supabase
     .from('brands')
-    .select('id, name, segment')
+    .select('id, name, segment, current_agency_validated_at')
     .in('id', brandIds)
 
-  return (brands || []).map(b => ({
+  // Prioriza marcas nunca validadas ou validadas há mais tempo
+  const sorted = (brands || []).sort((a, b) => {
+    const dateA = a.current_agency_validated_at ? new Date(a.current_agency_validated_at) : new Date(0)
+    const dateB = b.current_agency_validated_at ? new Date(b.current_agency_validated_at) : new Date(0)
+    return dateA - dateB  // mais antigas primeiro
+  })
+
+  return sorted.slice(0, limit).map(b => ({
     ...b,
     active_agencies: byBrand[b.id] || [],
   }))
@@ -67,19 +80,33 @@ async function loadBrandsWithActiveAgencies(limit = 50) {
 
 async function searchAgencyNews(brandName) {
   const queries = [
-    `"${brandName}" agência publicidade conta criação mídia digital 2025 2026`,
-    `"${brandName}" troca agência nova agência pitch concorrência`,
-    `"${brandName}" anuncia contratou escolheu agência`,
+    // Busca direta de relacionamento com agência
+    `"${brandName}" agência publicidade criação mídia digital`,
+    // Movimentações e trocas
+    `"${brandName}" troca agência nova agência pitch concorrência contratou`,
+    // Campanhas recentes (indicam agência atual)
+    `"${brandName}" campanha lança nova campanha publicidade`,
+    // Nomeações e executivos (indício de conta)
+    `"${brandName}" anuncia nomeia VP marketing CMO diretor marketing`,
   ]
 
   const results = []
   for (const q of queries) {
     const found = await search(q, {
-      maxResults:     5,
+      maxResults:     6,
       days:           DAYS_LOOKBACK,
       includeDomains: SEARCH_DOMAINS,
     })
     results.push(...found)
+  }
+
+  // Se encontrou muito pouco, faz busca ampliada com lookback maior
+  if (results.length < 3) {
+    const fallback = await search(
+      `"${brandName}" agência publicidade`,
+      { maxResults: 8, days: DAYS_LOOKBACK_FALLBACK, includeDomains: SEARCH_DOMAINS }
+    )
+    results.push(...fallback)
   }
 
   // Dedup por URL
@@ -94,7 +121,7 @@ async function searchAgencyNews(brandName) {
 // ─── Carrega artigos locais relevantes ───────────────────────────────────────
 
 async function loadLocalArticles(brandName) {
-  const since = new Date(Date.now() - DAYS_LOOKBACK * 24 * 60 * 60 * 1000)
+  const since = new Date(Date.now() - DAYS_LOOKBACK_FALLBACK * 24 * 60 * 60 * 1000)
     .toISOString().slice(0, 10)
 
   const { data } = await supabase
@@ -104,7 +131,7 @@ async function loadLocalArticles(brandName) {
     .gte('published_at', since)
     .not('extraction_status', 'eq', 'crawl_failed')
     .order('published_at', { ascending: false })
-    .limit(15)
+    .limit(20)
 
   return data || []
 }
@@ -124,15 +151,20 @@ async function analyzeAgencyStatus(brand, webResults, localArticles) {
     .map(a => `[${a.published_at?.slice(0,10) || ''}] ${a.source_name}: ${a.title}\n${(a.excerpt || '').slice(0, 200)}`)
     .join('\n\n')
 
-  const prompt = `Analise as notícias recentes (últimos 90 dias) sobre a marca "${brand.name}" e determine o status atual da sua relação com agências de publicidade.
+  const now = new Date()
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
 
-AGÊNCIAS REGISTRADAS ATUALMENTE COMO ATIVAS NO BANCO:
-${activeAgenciesText || '(nenhuma agência ativa registrada)'}
+  const prompt = `Você é um analista especialista em movimentações de contas publicitárias no mercado brasileiro. Analise as evidências abaixo sobre a marca "${brand.name}" e determine se a agência registrada no sistema ainda é a atual.
 
-NOTÍCIAS DA WEB (últimos 90 dias via busca):
+DATA DE HOJE: ${currentMonth}
+
+AGÊNCIAS REGISTRADAS COMO ATIVAS NO SISTEMA (podem estar desatualizadas):
+${activeAgenciesText || '(nenhuma agência registrada — precisa identificar a atual)'}
+
+EVIDÊNCIAS DA WEB (notícias e artigos):
 ${webEvidenceText || '(nenhuma notícia encontrada)'}
 
-ARTIGOS DO BANCO LOCAL (últimos 90 dias):
+ARTIGOS DO BANCO LOCAL:
 ${localEvidenceText || '(nenhum artigo local)'}
 
 Responda APENAS com JSON válido:
@@ -141,20 +173,23 @@ Responda APENAS com JSON válido:
   "new_agency": "Nome exato da nova agência" | null,
   "new_scope": "Criação" | "Mídia" | "Digital" | "PR" | "Geral" | null,
   "confidence": "alta" | "media" | "baixa",
-  "evidence_summary": "1-2 frases descrevendo a evidência",
+  "evidence_summary": "1-2 frases descrevendo a evidência encontrada",
   "change_date": "YYYY-MM" | null
 }
 
-Regras:
-- "agency_changed": true SOMENTE se há evidência EXPLÍCITA de mudança nos últimos 90 dias (novo contrato anunciado, pitch encerrado, saída confirmada).
-- "confidence": "alta" = notícia direta confirmando troca de agência com nome citado. "media" = indícios claros mas sem confirmação explícita. "baixa" = especulação, pitch em andamento sem resultado.
-- Se não há evidência de mudança → agency_changed: false (não altere dados corretos por falta de informação).
-- "new_agency" deve ser o nome EXATO da agência como aparece nos artigos, não o nome atual registrado.`
+Regras de análise:
+- "agency_changed": true se as evidências mostram que a agência atual é DIFERENTE da registrada no sistema, OR se o sistema não tem agência registrada mas as evidências apontam uma.
+- Troca de agência pode ser identificada por: anúncio de novo contrato, campanha assinada por agência diferente, notícia de pitch vencido, executivo de marketing que mudou empresa (indica mudança de estratégia), reestruturação de marketing.
+- "confidence": "alta" = agência nomeada diretamente no artigo como responsável pela conta/campanha. "media" = agência fortemente sugerida pelo contexto (ex: criou campanha recente, ganhou pitch). "baixa" = menção tangencial sem clareza.
+- Se a agência registrada aparece confirmada nas notícias recentes → agency_changed: false, confidence: alta.
+- Se não há evidência suficiente → agency_changed: false, confidence: baixa, evidence_summary explica a ausência.
+- "new_agency" deve ser o nome EXATO como aparece nos artigos (ex: "AlmapBBDO", "Ogilvy Brasil", "VMLY&R").
+- Ignore agências de mídia programática, produtoras e consultorias — foco em agências criativas/de comunicação.`
 
   try {
     const response = await client.messages.create({
-      model:      'claude-haiku-4-5',
-      max_tokens: 512,
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 600,
       messages:   [{ role: 'user', content: prompt }],
     })
 
@@ -179,7 +214,7 @@ async function applyAgencyChange(brand, analysis) {
   const month = changeMonth || (new Date().getMonth() + 1)
 
   // Encerra registros ativos do mesmo escopo (ou todos se escopo não especificado)
-  const updateQuery = supabase
+  let updateQuery = supabase
     .from('agency_history')
     .update({
       status:    'ended',
@@ -189,7 +224,7 @@ async function applyAgencyChange(brand, analysis) {
     .eq('brand_id', brand.id)
     .eq('status',   'active')
 
-  if (new_scope) updateQuery.eq('scope', new_scope)
+  if (new_scope) updateQuery = updateQuery.eq('scope', new_scope)
   await updateQuery
 
   // Cria novo registro ativo
@@ -281,11 +316,16 @@ async function runCurrentAgencyValidation({ limit = 50, onProgress } = {}) {
 
       stats.brands_analyzed++
 
+      // Registra timestamp de validação independente do resultado
+      await supabase
+        .from('brands')
+        .update({ current_agency_validated_at: new Date().toISOString() })
+        .eq('id', brand.id)
+
       if (!analysis.agency_changed) {
         stats.no_change++
-        // Sem ruído no log para marcas sem mudança — só loga se havia evidência
         if (webResults.length > 0) {
-          console.log(`[current-agency] ✓ ${brand.name}: sem mudança (${webResults.length} notícias analisadas)`)
+          console.log(`[current-agency] ✓ ${brand.name}: agência confirmada (${webResults.length} evidências, confiança: ${analysis.confidence})`)
         }
       } else if (analysis.confidence === 'alta') {
         // Auto-atualiza sem intervenção humana
