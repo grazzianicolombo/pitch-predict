@@ -16,11 +16,11 @@ const supabase  = require('../lib/supabase')
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 // ─── Concorrência ────────────────────────────────────────────────────────────
-// Tier1 Anthropic: limite de 50k tokens/min (input) em claude-haiku-4-5
-// Cada edição usa ~2.500 tokens de input → 3 simultâneas = ~7.5k tokens/chunk
-// Com delay de 1s entre chunks → máximo ~27k tokens/min (margem segura)
-const CONCURRENCY   = 3
-const CHUNK_DELAY_MS = 1000  // ms de pausa entre cada chunk (controla token rate)
+// Tier2+ Anthropic (com créditos): limite de 400k tokens/min em claude-haiku-4-5
+// Cada edição usa ~2.500 tokens de input → 10 simultâneas = ~25k tokens/chunk
+// Com delay de 200ms entre chunks → máximo ~300k tokens/min (margem segura)
+const CONCURRENCY   = 10
+const CHUNK_DELAY_MS = 200  // ms de pausa entre cada chunk (controla token rate)
 
 // Mapas de promessas pendentes — evita race condition ao criar brand/agency nova
 // quando múltiplas coroutines processam ao mesmo tempo
