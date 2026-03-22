@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concept B — Google Workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', 'Google Sans', 'Roboto', sans-serif; background: #F8F9FA; color: #202124; -webkit-font-smoothing: antialiased; display: flex; height: 100vh; }
+
+  /* Sidebar */
+  .sidebar { width: 256px; background: #FFFFFF; display: flex; flex-direction: column; border-right: 1px solid #E8EAED; }
+  .logo { padding: 18px 16px 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #E8EAED; }
+  .logo-icon { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #1A73E8, #4285F4); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px; font-weight: 600; flex-shrink: 0; }
+  .logo-text { }
+  .logo-name { font-size: 14px; font-weight: 600; color: #202124; letter-spacing: -0.1px; }
+  .logo-tag { font-size: 10.5px; color: #5F6368; margin-top: 1px; }
+  .nav { padding: 8px 8px; flex: 1; }
+  .nav-section { font-size: 10px; font-weight: 500; color: #80868B; letter-spacing: 0.1em; text-transform: uppercase; padding: 12px 8px 4px; }
+  .nav-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; font-size: 13.5px; font-weight: 400; color: #3C4043; cursor: pointer; border-radius: 0 24px 24px 0; margin-right: 0; transition: background 0.1s; }
+  .nav-item:hover { background: #F1F3F4; }
+  .nav-item.active { background: #E8F0FE; color: #1A73E8; font-weight: 500; border-radius: 0 24px 24px 0; }
+  .nav-icon { font-size: 16px; width: 20px; text-align: center; }
+  .sidebar-footer { padding: 12px 16px; border-top: 1px solid #E8EAED; display: flex; align-items: center; gap: 8px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #34A853; flex-shrink: 0; }
+  .status-text { font-size: 11.5px; color: #5F6368; }
+
+  /* Main */
+  .main { flex: 1; padding: 28px 32px; overflow: auto; background: #F8F9FA; }
+  .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .page-title { font-size: 22px; font-weight: 400; color: #202124; letter-spacing: -0.2px; }
+  .page-sub { font-size: 13px; color: #5F6368; margin-top: 2px; }
+  .btn-add { background: #1A73E8; color: #fff; border: none; padding: 8px 20px; border-radius: 4px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; letter-spacing: 0.01em; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+  .btn-add:hover { box-shadow: 0 2px 6px rgba(26,115,232,0.4); }
+
+  /* Card */
+  .card { background: #fff; border-radius: 8px; overflow: hidden; border: 1px solid #E8EAED; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { padding: 12px 16px; font-size: 11px; font-weight: 500; color: #5F6368; text-align: left; letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 1px solid #E8EAED; }
+  tbody td { padding: 12px 16px; font-size: 14px; border-bottom: 1px solid #F1F3F4; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: #F8F9FA; }
+  .name { font-weight: 500; color: #202124; }
+  .url { font-size: 12px; color: #5F6368; }
+  .badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 4px; font-size: 11.5px; font-weight: 500; }
+  .badge-blue { background: #E8F0FE; color: #1A73E8; }
+  .badge-green { background: #E6F4EA; color: #137333; }
+  .badge-gray { background: #F1F3F4; color: #5F6368; }
+  .actions { display: flex; gap: 4px; justify-content: flex-end; }
+  .btn-sm { background: transparent; border: 1px solid #DADCE0; color: #3C4043; padding: 5px 12px; border-radius: 4px; font-size: 12.5px; cursor: pointer; font-family: inherit; font-weight: 500; }
+  .btn-sm:hover { background: #F1F3F4; }
+  .btn-del { background: transparent; border: 1px solid #F28B82; color: #C5221F; padding: 5px 12px; border-radius: 4px; font-size: 12.5px; cursor: pointer; }
+  .concept-tag { position: fixed; top: 16px; right: 16px; background: #1A73E8; color: white; padding: 6px 14px; border-radius: 99px; font-size: 12px; font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="logo">
+    <div class="logo-icon">P</div>
+    <div class="logo-text">
+      <div class="logo-name">Pitch Predict</div>
+      <div class="logo-tag">Radar de Mercado</div>
+    </div>
+  </div>
+  <nav class="nav">
+    <div class="nav-section">Inteligência</div>
+    <div class="nav-item">
+      <span class="nav-icon">◈</span> Marcas
+    </div>
+    <div class="nav-item active">
+      <span class="nav-icon">⊕</span> Fontes
+    </div>
+    <div class="nav-section">Modelo</div>
+    <div class="nav-item">
+      <span class="nav-icon">◎</span> Sinais
+    </div>
+    <div class="nav-item">
+      <span class="nav-icon">⊘</span> Variáveis
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="status-dot"></div>
+    <span class="status-text">Supabase conectado</span>
+  </div>
+</div>
+
+<div class="main">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Fontes de Crawling</div>
+      <div class="page-sub">5 fontes monitoradas</div>
+    </div>
+    <button class="btn-add">+ Adicionar</button>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Nome</th><th>URL</th><th>Tipo</th><th>Frequência</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><div class="name">Adnews</div></td>
+          <td><div class="url">https://adnews.com.br</div></td>
+          <td><span class="badge badge-blue">Portal</span></td>
+          <td style="color:#5F6368;font-size:13.5px">Diário</td>
+          <td><span class="badge badge-green">● Ativo</span></td>
+          <td><div class="actions"><button class="btn-sm">Editar</button><button class="btn-del">×</button></div></td>
+        </tr>
+        <tr>
+          <td><div class="name">E-Commerce Brasil</div></td>
+          <td><div class="url">https://www.ecommercebrasil.com.br</div></td>
+          <td><span class="badge badge-blue">Portal</span></td>
+          <td style="color:#5F6368;font-size:13.5px">Diário</td>
+          <td><span class="badge badge-green">● Ativo</span></td>
+          <td><div class="actions"><button class="btn-sm">Editar</button><button class="btn-del">×</button></div></td>
+        </tr>
+        <tr>
+          <td><div class="name">Exame</div></td>
+          <td><div class="url">https://exame.com/marketing</div></td>
+          <td><span class="badge badge-blue">Portal</span></td>
+          <td style="color:#5F6368;font-size:13.5px">Diário</td>
+          <td><span class="badge badge-green">● Ativo</span></td>
+          <td><div class="actions"><button class="btn-sm">Editar</button><button class="btn-del">×</button></div></td>
+        </tr>
+        <tr>
+          <td><div class="name">Meio & Mensagem</div></td>
+          <td><div class="url">https://www.meioemensagem.com.br</div></td>
+          <td><span class="badge badge-blue">Portal</span></td>
+          <td style="color:#5F6368;font-size:13.5px">Diário</td>
+          <td><span class="badge badge-green">● Ativo</span></td>
+          <td><div class="actions"><button class="btn-sm">Editar</button><button class="btn-del">×</button></div></td>
+        </tr>
+        <tr>
+          <td><div class="name">Propmark</div></td>
+          <td><div class="url">https://propmark.com.br</div></td>
+          <td><span class="badge badge-blue">Portal</span></td>
+          <td style="color:#5F6368;font-size:13.5px">Diário</td>
+          <td><span class="badge badge-green">● Ativo</span></td>
+          <td><div class="actions"><button class="btn-sm">Editar</button><button class="btn-del">×</button></div></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="concept-tag">Conceito B — Google Workspace</div>
+</body>
+</html>

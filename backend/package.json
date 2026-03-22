@@ -1,0 +1,25 @@
+{
+  "name": "pitch-predict-backend",
+  "version": "1.0.0",
+  "description": "Backend API",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
+    "@supabase/supabase-js": "^2.99.3",
+    "@tavily/core": "^0.7.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "multer": "^2.1.1",
+    "node-cron": "^4.2.1",
+    "peopledatalabs": "^14.1.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

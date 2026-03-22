@@ -1,0 +1,35 @@
+# Dependências
+node_modules/
+**/node_modules/
+
+# Variáveis de ambiente (NUNCA subir para o repo)
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+frontend/.env.local
+
+# Build
+frontend/dist/
+frontend/build/
+
+# Logs
+*.log
+npm-debug.log*
+/tmp/
+
+# Jobs persistidos localmente
+backend/src/lib/jobs-store.json
+
+# Uploads e dados temporários
+uploads/
+data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

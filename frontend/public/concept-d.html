@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<title>Concept D — Stripe Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', system-ui, sans-serif; background: #F6F8FA; color: #0A2540; -webkit-font-smoothing: antialiased; display: flex; height: 100vh; font-size: 14px; }
+
+  /* Sidebar */
+  .sidebar { width: 220px; background: #0A2540; display: flex; flex-direction: column; flex-shrink: 0; }
+  .logo { padding: 20px 18px 18px; border-bottom: 1px solid rgba(255,255,255,0.07); }
+  .logo-name { font-size: 14px; font-weight: 600; color: #FFFFFF; letter-spacing: -0.2px; }
+  .logo-tag { font-size: 10.5px; color: rgba(255,255,255,0.35); margin-top: 3px; letter-spacing: 0.05em; text-transform: uppercase; }
+  .nav { padding: 10px 10px; flex: 1; }
+  .nav-section { font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.25); letter-spacing: 0.1em; text-transform: uppercase; padding: 12px 8px 4px; }
+  .nav-item { display: flex; align-items: center; gap: 9px; padding: 7px 8px; font-size: 13px; font-weight: 400; color: rgba(255,255,255,0.55); cursor: pointer; border-radius: 6px; transition: all 0.12s; }
+  .nav-item:hover { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.85); }
+  .nav-item.active { background: rgba(255,255,255,0.1); color: #FFFFFF; font-weight: 500; }
+  .nav-icon { font-size: 13px; width: 16px; text-align: center; opacity: 0.7; }
+  .nav-item.active .nav-icon { opacity: 1; }
+  .sidebar-footer { padding: 12px 18px; border-top: 1px solid rgba(255,255,255,0.07); display: flex; align-items: center; gap: 8px; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #30D158; flex-shrink: 0; }
+  .status-text { font-size: 11px; color: rgba(255,255,255,0.3); }
+
+  /* Main */
+  .main { flex: 1; padding: 32px 36px; overflow: auto; }
+  .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
+  .page-title { font-size: 21px; font-weight: 600; color: #0A2540; letter-spacing: -0.4px; }
+  .page-sub { font-size: 13px; color: #6B7C93; margin-top: 3px; font-weight: 400; }
+  .btn-add { background: #635BFF; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; box-shadow: 0 1px 3px rgba(99,91,255,0.4); }
+
+  /* Card */
+  .card { background: #fff; border-radius: 8px; border: 1px solid #E3E8EE; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { padding: 10px 16px; font-size: 11px; font-weight: 600; color: #8898AA; text-align: left; letter-spacing: 0.06em; text-transform: uppercase; background: #F7FAFC; border-bottom: 1px solid #E3E8EE; }
+  tbody td { padding: 13px 16px; font-size: 13.5px; border-bottom: 1px solid #F0F4F8; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: #FAFCFF; }
+  .name { font-weight: 500; color: #1A1F36; }
+  .url { font-size: 12px; color: #8898AA; font-family: 'SF Mono', 'Menlo', monospace; }
+  .badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 20px; font-size: 11.5px; font-weight: 500; }
+  .badge-blue { background: #EEF2FF; color: #635BFF; }
+  .badge-green { background: #EDFAED; color: #09825D; }
+  .badge-gray { background: #F5F8FF; color: #8898AA; }
+  .actions { display: flex; gap: 6px; justify-content: flex-end; }
+  .btn-sm { background: #fff; border: 1px solid #E3E8EE; color: #3C4257; padding: 5px 10px; border-radius: 5px; font-size: 12px; cursor: pointer; font-family: inherit; font-weight: 500; }
+  .btn-sm:hover { border-color: #C3CBD8; }
+  .btn-del { background: #FFF5F5; border: 1px solid #FCA5A5; color: #E5424D; padding: 5px 10px; border-radius: 5px; font-size: 12px; cursor: pointer; }
+  .concept-tag { position: fixed; top: 16px; right: 16px; background: #635BFF; color: white; padding: 6px 14px; border-radius: 99px; font-size: 12px; font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="logo">
+    <div class="logo-name">Pitch Predict</div>
+    <div class="logo-tag">Radar de Mercado</div>
+  </div>
+  <nav class="nav">
+    <div class="nav-section">Inteligência</div>
+    <div class="nav-item"><span class="nav-icon">◈</span> Marcas</div>
+    <div class="nav-item active"><span class="nav-icon">⊕</span> Fontes</div>
+    <div class="nav-section">Modelo</div>
+    <div class="nav-item"><span class="nav-icon">◎</span> Sinais</div>
+    <div class="nav-item"><span class="nav-icon">⊘</span> Variáveis</div>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="status-dot"></div>
+    <span class="status-text">Supabase conectado</span>
+  </div>
+</div>
+
+<div class="main">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Fontes de Crawling</div>
+      <div class="page-sub">5 fontes monitoradas</div>
+    </div>
+    <button class="btn-add">+ Adicionar fonte</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Nome</th><th>URL</th><th>Tipo</th><th>Frequência</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        <tr><td><div class="name">Adnews</div></td><td><div class="url">adnews.com.br</div></td><td><span class="badge badge-blue">Portal</span></td><td style="color:#8898AA">Diário</td><td><span class="badge badge-green">● Ativo</span></td><td><div class="actions"><button class="btn-sm">Editar</button><button class="btn-del">×</button></div></td></tr>
+        <tr><td><div class="name">E-Commerce Brasil</div></td><td><div class="url">ecommercebrasil.com.br</div></td><td><span class="badge badge-blue">Portal</span></td><td style="color:#8898AA">Diário</td><td><span class="badge badge-green">● Ativo</span></td><td><div class="actions"><button class="btn-sm">Editar</button><button class="btn-del">×</button></div></td></tr>
+        <tr><td><div class="name">Exame</div></td><td><div class="url">exame.com/marketing</div></td><td><span class="badge badge-blue">Portal</span></td><td style="color:#8898AA">Diário</td><td><span class="badge badge-green">● Ativo</span></td><td><div class="actions"><button class="btn-sm">Editar</button><button class="btn-del">×</button></div></td></tr>
+        <tr><td><div class="name">Meio & Mensagem</div></td><td><div class="url">meioemensagem.com.br</div></td><td><span class="badge badge-blue">Portal</span></td><td style="color:#8898AA">Diário</td><td><span class="badge badge-green">● Ativo</span></td><td><div class="actions"><button class="btn-sm">Editar</button><button class="btn-del">×</button></div></td></tr>
+        <tr><td><div class="name">Propmark</div></td><td><div class="url">propmark.com.br</div></td><td><span class="badge badge-blue">Portal</span></td><td style="color:#8898AA">Diário</td><td><span class="badge badge-green">● Ativo</span></td><td><div class="actions"><button class="btn-sm">Editar</button><button class="btn-del">×</button></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="concept-tag">Conceito D — Stripe</div>
+</body>
+</html>
