@@ -128,7 +128,10 @@
       "Bash(pkill -f 'node src/server.js')",
       "Bash(pkill -f node.*server.js)",
       "Bash(lsof -ti:3001)",
-      "Bash(xargs kill:*)"
+      "Bash(xargs kill:*)",
+      "Bash(railway --version)",
+      "Bash(railway status:*)",
+      "Bash(railway login:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
