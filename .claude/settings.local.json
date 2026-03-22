@@ -159,7 +159,8 @@
       "Bash(git commit:*)",
       "Bash(gh run:*)",
       "Bash(grep -r VITE_API /Users/tennet/Claude/pitch-predict/frontend/.env*)",
-      "Bash(curl -s -X POST https://pitch-predict-production.up.railway.app/api/auth/forgot-password -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"grazzi81@gmail.com\"\"}')"
+      "Bash(curl -s -X POST https://pitch-predict-production.up.railway.app/api/auth/forgot-password -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"grazzi81@gmail.com\"\"}')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://pitch-predict-production.up.railway.app/api/brands)"
     ]
   },
   "enableAllProjectMcpServers": true,
