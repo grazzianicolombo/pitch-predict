@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import api from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 
 const CONFIDENCE_COLORS = { alta: '#16A34A', média: '#F59E0B', baixa: '#EF4444' }
 
@@ -25,6 +26,7 @@ function ProgressBar({ progress, total }) {
 }
 
 export default function Validation() {
+  const { isSuperadmin } = useAuth()
   const [queue, setQueue]         = useState([])
   const [loading, setLoading]     = useState(true)
   const [running, setRunning]     = useState(false)
@@ -122,14 +124,16 @@ export default function Validation() {
           <h1 className="page-title">Agente Validador</h1>
           <p className="page-subtitle">Busca notícias jan–mar 2026 antes de sugerir qualquer mudança</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {resolved.length > 0 && !running && (
-            <button className="btn btn-ghost" onClick={clearResolved}>Limpar resolvidos</button>
-          )}
-          <button className="btn btn-primary" onClick={runAgent} disabled={running}>
-            {running ? '⟳ Analisando…' : '▶ Executar agente'}
-          </button>
-        </div>
+        {isSuperadmin && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            {resolved.length > 0 && !running && (
+              <button className="btn btn-ghost" onClick={clearResolved}>Limpar resolvidos</button>
+            )}
+            <button className="btn btn-primary" onClick={runAgent} disabled={running}>
+              {running ? '⟳ Analisando…' : '▶ Executar agente'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Stats */}
@@ -206,7 +210,7 @@ export default function Validation() {
         <div className="card" style={{ marginBottom: '1rem' }}>
           <div className="section-header">
             <span className="section-title">Pendentes ({pending.length})</span>
-            <button className="btn btn-primary btn-sm" onClick={approveAll}>Aprovar todos</button>
+            {isSuperadmin && <button className="btn btn-primary btn-sm" onClick={approveAll}>Aprovar todos</button>}
           </div>
           <table className="data-table">
             <thead>
@@ -245,10 +249,12 @@ export default function Validation() {
                       </span>
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      <button className="btn btn-sm" style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', color: '#16A34A', marginRight: 4 }}
-                        onClick={e => { e.stopPropagation(); approve(item.id) }}>✓ Aplicar</button>
-                      <button className="btn btn-danger btn-sm"
-                        onClick={e => { e.stopPropagation(); reject(item.id) }}>✕</button>
+                      {isSuperadmin && <>
+                        <button className="btn btn-sm" style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', color: '#16A34A', marginRight: 4 }}
+                          onClick={e => { e.stopPropagation(); approve(item.id) }}>✓ Aplicar</button>
+                        <button className="btn btn-danger btn-sm"
+                          onClick={e => { e.stopPropagation(); reject(item.id) }}>✕</button>
+                      </>}
                     </td>
                   </tr>,
                   isExpanded && (

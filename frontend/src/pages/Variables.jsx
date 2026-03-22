@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { variablesAPI } from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 
 const TYPES = ['sinal', 'indicador']
 const empty = { name: '', weight: 1.0, type: 'sinal', description: '', active: true }
 
 export default function Variables() {
+  const { isSuperadmin } = useAuth()
   const [items, setItems] = useState([])
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState(empty)
@@ -44,7 +46,7 @@ export default function Variables() {
           <h1 className="page-title">Variáveis do Modelo</h1>
           <p className="page-subtitle">Fatores preditivos · pesos calibrados</p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd}>+ Adicionar</button>
+        {isSuperadmin && <button className="btn btn-primary" onClick={openAdd}>+ Adicionar</button>}
       </div>
 
       <div className="card">
@@ -89,11 +91,13 @@ export default function Variables() {
                       {item.active ? 'Ativo' : 'Inativo'}
                     </span>
                   </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)}>Editar</button>
-                    {' '}
-                    <button className="btn btn-danger btn-sm" onClick={() => remove(item.id)}>×</button>
-                  </td>
+                  {isSuperadmin && (
+                    <td style={{ textAlign: 'right' }}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)}>Editar</button>
+                      {' '}
+                      <button className="btn btn-danger btn-sm" onClick={() => remove(item.id)}>×</button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

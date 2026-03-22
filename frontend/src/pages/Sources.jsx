@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import api from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 
 // ─── Configuração estática das fontes ──────────────────────────────────────
 const SOURCES_META = {
@@ -190,7 +191,7 @@ function PdfUploadArea({ sourceId, onUploaded }) {
 }
 
 // ─── Card estático para fontes manuais sem job ──────────────────────────────
-function StaticSourceCard({ meta }) {
+function StaticSourceCard({ meta, canEdit }) {
   const [enabled, setEnabled] = useState(meta.status === 'ativo')
   const st = enabled ? (STATUS_STYLE[meta.status] || STATUS_STYLE.pendente) : { label: 'Desativado', bg: '#F3F4F6', color: '#9CA3AF' }
   const cov = COVERAGE_STYLE[meta.coverage] || {}
@@ -219,7 +220,7 @@ function StaticSourceCard({ meta }) {
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 12 }}>
-          {meta.editUrl && (
+          {canEdit && meta.editUrl && (
             <a href={meta.editUrl} target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)',
                 background: 'var(--surface)', color: 'var(--text-muted)', textDecoration: 'none',
@@ -227,7 +228,7 @@ function StaticSourceCard({ meta }) {
               ✎ Editar
             </a>
           )}
-          <button
+          {canEdit && <button
             onClick={() => setEnabled(!enabled)}
             title={enabled ? 'Desativar fonte' : 'Ativar fonte'}
             style={{
@@ -239,7 +240,7 @@ function StaticSourceCard({ meta }) {
               width: 16, height: 16, borderRadius: '50%', background: '#fff',
               boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.2s',
             }} />
-          </button>
+          </button>}
         </div>
       </div>
     </div>
@@ -326,7 +327,7 @@ function LogPanel({ sourceId }) {
   )
 }
 
-function JobCard({ job, meta, onSave, onUploaded }) {
+function JobCard({ job, meta, onSave, onUploaded, canEdit }) {
   const [open, setOpen]       = useState(false)
   const [logOpen, setLogOpen] = useState(false)
   const [freq, setFreq]       = useState(job?.frequency || 'manual')
@@ -380,7 +381,7 @@ function JobCard({ job, meta, onSave, onUploaded }) {
           )}
 
           {/* Expandido: config de schedule ou PDF upload */}
-          {open && (
+          {open && canEdit && (
             <div style={{ marginTop: 14, padding: '12px 14px', background: '#F8FAFC', borderRadius: 8, border: '1px solid #E2E8F0' }}>
               {meta?.canPdf ? (
                 <>
@@ -494,7 +495,7 @@ function JobCard({ job, meta, onSave, onUploaded }) {
           {/* Ações */}
           <div style={{ display: 'flex', gap: 6, marginTop: 4, alignItems: 'center' }}>
             {/* Toggle ativo/inativo */}
-            {!meta?.canPdf && meta?.status !== 'pendente' && (
+            {canEdit && !meta?.canPdf && meta?.status !== 'pendente' && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}
                 title={enabled ? 'Desativar fonte' : 'Ativar fonte'}>
                 <div style={{
@@ -520,7 +521,7 @@ function JobCard({ job, meta, onSave, onUploaded }) {
             )}
 
             {/* Botão editar agendamento ou upload */}
-            {meta?.canPdf ? (
+            {canEdit && (meta?.canPdf ? (
               <button className="btn btn-sm btn-ghost" onClick={() => setOpen(!open)}
                 style={{ fontSize: 11 }}>
                 {open ? '✕ Fechar' : '📄 Upload PDF'}
@@ -530,7 +531,7 @@ function JobCard({ job, meta, onSave, onUploaded }) {
                 style={{ fontSize: 11 }}>
                 {open ? '✕' : '⚙ Editar'}
               </button>
-            )}
+            ))}
 
             {/* Botão de log — fontes com histórico */}
             {meta?.status !== 'pendente' && !meta?.canPdf && (
@@ -554,6 +555,7 @@ function JobCard({ job, meta, onSave, onUploaded }) {
 const CATEGORIES = ['Contas & Agências', 'Executivos & Empresa', 'Dados da Empresa', 'Dados de Mercado', 'Em Avaliação']
 
 export default function Sources() {
+  const { isSuperadmin } = useAuth()
   const [jobs, setJobs]       = useState([])
   const [loading, setLoading] = useState(true)
   const [stats, setStats]     = useState(null)
@@ -637,9 +639,10 @@ export default function Sources() {
                     meta={meta}
                     onSave={handleSave}
                     onUploaded={() => api.get('/sources/jobs').then(r => setJobs(r.data))}
+                    canEdit={isSuperadmin}
                   />
                 ) : (
-                  <StaticSourceCard key={sourceId} meta={meta} />
+                  <StaticSourceCard key={sourceId} meta={meta} canEdit={isSuperadmin} />
                 )
               })}
             </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { agenciesAPI } from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 
 const CATEGORY = {
   internacional: { label: 'Grupos Internacionais', color: '#3B82F6' },
@@ -18,6 +19,7 @@ const empty = {
 }
 
 export default function Agencies() {
+  const { isSuperadmin } = useAuth()
   const [items, setItems]           = useState([])
   const [loading, setLoading]       = useState(true)
   const [filterCat, setFilterCat]   = useState('todos')
@@ -139,7 +141,7 @@ export default function Agencies() {
           <h1 className="page-title">Agências</h1>
           <p className="page-subtitle">Mapa das Agências no Brasil 2025 · Meio &amp; Mensagem</p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd}>+ Nova agência</button>
+        {isSuperadmin && <button className="btn btn-primary" onClick={openAdd}>+ Nova agência</button>}
       </div>
 
       {/* Stats */}
@@ -214,7 +216,7 @@ export default function Agencies() {
                 <SortTh label="Liderança"       col="leadership" sort={sort} onSort={toggleSort} />
                 <SortTh label="Especialidades"  col={null}       sort={sort} onSort={toggleSort} />
                 <SortTh label="Categoria"       col="category"   sort={sort} onSort={toggleSort} />
-                <th />
+                {isSuperadmin && <th />}
               </tr>
             </thead>
             <tbody>
@@ -247,11 +249,13 @@ export default function Agencies() {
                         </span>
                       )}
                     </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)}>Editar</button>
-                      {' '}
-                      <button className="btn btn-danger btn-sm" onClick={() => remove(item.id)}>×</button>
-                    </td>
+                    {isSuperadmin && (
+                      <td style={{ textAlign: 'right' }}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)}>Editar</button>
+                        {' '}
+                        <button className="btn btn-danger btn-sm" onClick={() => remove(item.id)}>×</button>
+                      </td>
+                    )}
                   </tr>
                 )
               })}

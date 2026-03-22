@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import api from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 
 const API_META = {
   anthropic: {
@@ -49,7 +50,7 @@ function UsageBar({ label, value, max, unit }) {
   )
 }
 
-function ApiCard({ apiConfig, onSave }) {
+function ApiCard({ apiConfig, onSave, canEdit }) {
   const meta = API_META[apiConfig.id] || {}
   const [editing, setEditing] = useState(false)
   const [newKey, setNewKey]   = useState('')
@@ -124,9 +125,11 @@ function ApiCard({ apiConfig, onSave }) {
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#374151', flex: 1 }}>
           {apiConfig.key_masked || '••••••••••••'}
         </span>
-        <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(!editing); setNewKey(''); setTestResult(null) }}>
-          {editing ? 'Cancelar' : '✎ Editar chave'}
-        </button>
+        {canEdit && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(!editing); setNewKey(''); setTestResult(null) }}>
+            {editing ? 'Cancelar' : '✎ Editar chave'}
+          </button>
+        )}
       </div>
 
       {/* Formulário de edição */}
@@ -225,6 +228,7 @@ function ApiCard({ apiConfig, onSave }) {
 }
 
 export default function Setup() {
+  const { isSuperadmin } = useAuth()
   const [data, setData]     = useState(null)
   const [loading, setLoading] = useState(true)
   const [logOpen, setLogOpen] = useState(false)
@@ -280,7 +284,7 @@ export default function Setup() {
       ) : (
         <>
           {data?.apis?.map(apiConfig => (
-            <ApiCard key={apiConfig.id} apiConfig={apiConfig} onSave={load} />
+            <ApiCard key={apiConfig.id} apiConfig={apiConfig} onSave={load} canEdit={isSuperadmin} />
           ))}
 
           {/* Log recente */}

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { brandsAPI, agenciesAPI } from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 
 const SEGMENTS = ['Alimentação', 'Automotivo', 'Bancos e Finanças', 'Bebidas', 'Cosméticos',
   'E-commerce', 'Energia', 'Farmácia', 'Moda', 'Saúde', 'Seguros', 'Telecom', 'Varejo', 'Outro']
@@ -28,6 +29,7 @@ const emptyLeader = { name: '', title: 'CMO', linkedin: '', start_date: '', end_
   is_current: true, team_size_estimate: '' }
 
 export default function Brands() {
+  const { isSuperadmin } = useAuth()
   const [brands, setBrands] = useState([])
   const [agencies, setAgencies] = useState([])
   const [selected, setSelected] = useState(null)
@@ -110,7 +112,7 @@ export default function Brands() {
       <div className="card" style={{ width: 256, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
         <div className="section-header">
           <span className="section-title">Marcas <span style={{ color: 'var(--text-dim)' }}>({brands.length})</span></span>
-          <button className="btn btn-primary btn-sm" onClick={() => { setForm(emptyBrand); setEditTarget(null); setModal('brand') }}>+</button>
+          {isSuperadmin && <button className="btn btn-primary btn-sm" onClick={() => { setForm(emptyBrand); setEditTarget(null); setModal('brand') }}>+</button>}
         </div>
         <div style={{ padding: '8px' }}>
           <input className="field-input" placeholder="Buscar marca..." value={search}
@@ -172,13 +174,15 @@ export default function Brands() {
                     <KV label="Agências 10 anos" value={new Set(history10y.map(h => h.agency)).size || '—'} />
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginLeft: 16 }}>
-                  <button className="btn btn-ghost btn-sm"
-                    onClick={() => { setForm({ ...selected }); setEditTarget(selected); setModal('brand') }}>
-                    Editar
-                  </button>
-                  <button className="btn btn-danger btn-sm" onClick={() => deleteBrand(selected.id)}>Remover</button>
-                </div>
+                {isSuperadmin && (
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginLeft: 16 }}>
+                    <button className="btn btn-ghost btn-sm"
+                      onClick={() => { setForm({ ...selected }); setEditTarget(selected); setModal('brand') }}>
+                      Editar
+                    </button>
+                    <button className="btn btn-danger btn-sm" onClick={() => deleteBrand(selected.id)}>Remover</button>
+                  </div>
+                )}
               </div>
               {selected.website && (
                 <a href={selected.website} target="_blank" rel="noreferrer"
@@ -209,10 +213,10 @@ export default function Brands() {
                 <div className="card" style={{ marginBottom: '1rem' }}>
                   <div className="section-header">
                     <span className="section-title">Histórico de Agências · Timeline</span>
-                    <button className="btn btn-ghost btn-sm"
+                    {isSuperadmin && <button className="btn btn-ghost btn-sm"
                       onClick={() => { setForm(emptyHistory); setEditTarget(null); setModal('history') }}>
                       + Adicionar
-                    </button>
+                    </button>}
                   </div>
                   {(selected.agency_history || []).length === 0 ? (
                     <div className="empty-state"><p>Nenhum histórico registrado</p></div>
@@ -226,10 +230,10 @@ export default function Brands() {
                   <div className="card">
                     <div className="section-header">
                       <span className="section-title">Líderes de Marketing · Timeline</span>
-                      <button className="btn btn-ghost btn-sm"
+                      {isSuperadmin && <button className="btn btn-ghost btn-sm"
                         onClick={() => { setForm(emptyLeader); setEditTarget(null); setModal('leader') }}>
                         + Adicionar
-                      </button>
+                      </button>}
                     </div>
                     <div style={{ padding: '16px 20px', overflowX: 'auto' }}>
                       <LeadersTimeline leaders={selected.marketing_leaders} />
@@ -244,10 +248,10 @@ export default function Brands() {
               <div className="card">
                 <div className="section-header">
                   <span className="section-title">Histórico de Agências</span>
-                  <button className="btn btn-ghost btn-sm"
+                  {isSuperadmin && <button className="btn btn-ghost btn-sm"
                     onClick={() => { setForm(emptyHistory); setEditTarget(null); setModal('history') }}>
                     + Adicionar
-                  </button>
+                  </button>}
                 </div>
                 <table className="data-table">
                   <thead>
@@ -288,12 +292,14 @@ export default function Brands() {
                             {h.status === 'active' ? 'Ativo' : 'Encerrado'}
                           </span>
                         </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <button className="btn btn-ghost btn-sm"
-                            onClick={() => { setForm({ ...h }); setEditTarget(h); setModal('history') }}>Editar</button>
-                          {' '}
-                          <button className="btn btn-danger btn-sm" onClick={() => deleteHistory(h.id)}>×</button>
-                        </td>
+                        {isSuperadmin && (
+                          <td style={{ textAlign: 'right' }}>
+                            <button className="btn btn-ghost btn-sm"
+                              onClick={() => { setForm({ ...h }); setEditTarget(h); setModal('history') }}>Editar</button>
+                            {' '}
+                            <button className="btn btn-danger btn-sm" onClick={() => deleteHistory(h.id)}>×</button>
+                          </td>
+                        )}
                       </tr>
                     )
                   })}
@@ -307,10 +313,10 @@ export default function Brands() {
               <div className="card">
                 <div className="section-header">
                   <span className="section-title">Líderes de Marketing</span>
-                  <button className="btn btn-ghost btn-sm"
+                  {isSuperadmin && <button className="btn btn-ghost btn-sm"
                     onClick={() => { setForm(emptyLeader); setEditTarget(null); setModal('leader') }}>
                     + Adicionar
-                  </button>
+                  </button>}
                 </div>
                 <table className="data-table">
                   <thead>
@@ -342,12 +348,14 @@ export default function Brands() {
                             {l.is_current ? 'Atual' : 'Ex'}
                           </span>
                         </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <button className="btn btn-ghost btn-sm"
-                            onClick={() => { setForm({ ...l }); setEditTarget(l); setModal('leader') }}>Editar</button>
-                          {' '}
-                          <button className="btn btn-danger btn-sm" onClick={() => deleteLeader(l.id)}>×</button>
-                        </td>
+                        {isSuperadmin && (
+                          <td style={{ textAlign: 'right' }}>
+                            <button className="btn btn-ghost btn-sm"
+                              onClick={() => { setForm({ ...l }); setEditTarget(l); setModal('leader') }}>Editar</button>
+                            {' '}
+                            <button className="btn btn-danger btn-sm" onClick={() => deleteLeader(l.id)}>×</button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                     {!selected.marketing_leaders?.length && (

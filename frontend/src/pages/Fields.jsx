@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { fieldsAPI } from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 
 const CATEGORIES = [
   { key: 'pessoas',       label: 'Pessoas',        icon: '◈', color: '#7C5CBF' },
@@ -65,7 +66,7 @@ function WeightSlider({ value, onChange }) {
   )
 }
 
-function SignalCard({ item, onEdit }) {
+function SignalCard({ item, onEdit, canEdit }) {
   const cat = CAT_MAP[item.category] || CAT_MAP['outro']
   return (
     <div style={{
@@ -99,14 +100,17 @@ function SignalCard({ item, onEdit }) {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
         <WeightBar value={item.weight ?? 1.0} />
-        <button className="btn btn-ghost btn-sm" onClick={() => onEdit(item)}
-          style={{ whiteSpace: 'nowrap' }}>Editar</button>
+        {canEdit && (
+          <button className="btn btn-ghost btn-sm" onClick={() => onEdit(item)}
+            style={{ whiteSpace: 'nowrap' }}>Editar</button>
+        )}
       </div>
     </div>
   )
 }
 
 export default function Fields() {
+  const { isSuperadmin } = useAuth()
   const [items, setItems]         = useState([])
   const [events, setEvents]       = useState([])
   const [modal, setModal]         = useState(null)
@@ -177,7 +181,7 @@ export default function Fields() {
           <p className="page-subtitle">{totalActive} sinais ativos · Agente correlacionador de agência</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary" onClick={openAdd}>+ Novo sinal</button>
+          {isSuperadmin && <button className="btn btn-primary" onClick={openAdd}>+ Novo sinal</button>}
         </div>
       </div>
 
@@ -255,7 +259,7 @@ export default function Fields() {
                     <div className="card" style={{ padding: '0 16px' }}>
                       {catItems.map((item, idx) => (
                         <div key={item.id} style={{ position: 'relative' }}>
-                          <SignalCard item={item} onEdit={openEdit} />
+                          <SignalCard item={item} onEdit={openEdit} canEdit={isSuperadmin} />
                           {idx === catItems.length - 1 && (
                             // Remove bottom border on last item
                             <style>{`#card-${item.id} { border-bottom: none }`}</style>
