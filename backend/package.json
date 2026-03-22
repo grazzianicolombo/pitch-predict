@@ -5,8 +5,10 @@
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "start": "sh start.sh",
+    "start:direct": "node src/server.js",
+    "dev": "doppler run -- nodemon src/server.js",
+    "dev:nodoppler": "nodemon src/server.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

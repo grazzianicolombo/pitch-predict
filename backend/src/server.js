@@ -1,4 +1,11 @@
-require('dotenv').config({ override: true })
+// Variáveis de ambiente injetadas pelo Doppler (local: doppler run -- node ...  |  prod: doppler run via start.sh)
+// NÃO usar require('dotenv') — o Doppler CLI injeta direto no process.env antes do processo iniciar.
+// Em desenvolvimento sem Doppler configurado, use: npm run dev:nodoppler (carrega .env local como fallback)
+if (!process.env.DOPPLER_PROJECT && !process.env.SUPABASE_URL) {
+  // Fallback para .env local apenas em dev (nunca em produção)
+  require('dotenv').config()
+}
+
 const express = require('express')
 const cors = require('cors')
 
@@ -16,11 +23,21 @@ const { requireAuth }   = require('./lib/auth')
 const app = express()
 const PORT = process.env.PORT || 3001
 
+// CORS fail-closed: em produção ALLOWED_ORIGINS é obrigatório
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim())
+  : []
+
+if (allowedOrigins.length === 0) {
+  // Em dev local sem Doppler, permite localhost — nunca permite wildcard '*'
+  allowedOrigins.push('http://localhost:5173', 'http://localhost:3000')
+  console.warn('[CORS] ALLOWED_ORIGINS não definido — permitindo apenas localhost. Configure via Doppler em produção.')
+}
+
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim())
-    : '*',
+  origin: allowedOrigins,
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }))
 app.use(express.json({ limit: '2mb' }))
 app.use(express.urlencoded({ extended: true }))

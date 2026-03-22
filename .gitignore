@@ -2,13 +2,20 @@
 node_modules/
 **/node_modules/
 
-# Variáveis de ambiente (NUNCA subir para o repo)
+# Variáveis de ambiente — NUNCA subir para o repo
+# Todos os segredos são gerenciados pelo Doppler
 .env
 .env.local
+.env.production
+.env.staging
 .env.*.local
-backend/.env
-frontend/.env
-frontend/.env.local
+**/.env
+**/.env.*
+!**/.env.example    # .env.example pode ser commitado (não tem valores reais)
+
+# Doppler — tokens nunca devem estar em arquivo
+.doppler-token
+doppler-token.txt
 
 # Build
 frontend/dist/

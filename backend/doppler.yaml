@@ -1,0 +1,6 @@
+# Doppler project configuration — sem segredos, pode ser commitado com segurança
+# Referencia o projeto e config do Doppler para dev local
+# Crie o projeto em: https://dashboard.doppler.com
+setup:
+  project: pitch-predict
+  config: dev
