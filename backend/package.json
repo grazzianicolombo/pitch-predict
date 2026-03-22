@@ -17,7 +17,8 @@
     "express": "^4.18.2",
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",
-    "peopledatalabs": "^14.1.1"
+    "peopledatalabs": "^14.1.1",
+    "resend": "^6.9.4"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

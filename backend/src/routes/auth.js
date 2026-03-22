@@ -13,12 +13,15 @@
 const express  = require('express')
 const router   = express.Router()
 const { createClient } = require('@supabase/supabase-js')
+const { Resend } = require('resend')
 const { requireAuth, requireRole } = require('../lib/auth')
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 )
+
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 // ─── Login ───────────────────────────────────────────────────────────────────
 
@@ -130,21 +133,63 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
 
   const FRONTEND = process.env.FRONTEND_URL || 'https://pitch-predict.vercel.app'
 
-  // Envia convite por email (usuário define a própria senha ao clicar no link)
-  const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-    redirectTo: `${FRONTEND}/auth/callback`,
-    data: { name },
+  // Cria o usuário no Supabase Auth
+  const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    email_confirm: false,
+    user_metadata: { name },
   })
   if (authErr) return res.status(400).json({ error: authErr.message })
 
   // Cria perfil
   const { data: profile, error: profErr } = await supabaseAdmin
     .from('user_profiles')
-    .insert({ user_id: authData.user.id, name, email, role })
+    .insert({ user_id: authData.user.id, name, email, role, active: true })
     .select()
     .single()
 
-  if (profErr) return res.status(500).json({ error: profErr.message })
+  if (profErr) {
+    // Rollback: remove o usuário do Auth se o perfil falhou
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
+    return res.status(500).json({ error: profErr.message })
+  }
+
+  // Gera link de convite para o usuário definir a senha
+  const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+    type: 'invite',
+    email,
+    options: { redirectTo: `${FRONTEND}/auth/callback` },
+  })
+  if (linkErr) return res.status(500).json({ error: linkErr.message })
+
+  // Envia email via Resend API
+  const inviteUrl = linkData.properties.action_link
+  await resend.emails.send({
+    from: 'Pitch Predict <onboarding@resend.dev>',
+    to: email,
+    subject: 'Você foi convidado para o Pitch Predict',
+    html: `
+      <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
+        <div style="margin-bottom: 24px;">
+          <span style="font-size: 22px; font-weight: 800;">Pitch Predict</span>
+        </div>
+        <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Olá, ${name}!</h2>
+        <p style="color: #555; margin-bottom: 24px;">
+          Você foi convidado para acessar o <strong>Pitch Predict</strong> — inteligência preditiva para pitchs de agências.
+        </p>
+        <a href="${inviteUrl}" style="
+          display: inline-block; padding: 12px 28px; border-radius: 8px;
+          background: linear-gradient(135deg, #2563EB, #7C3AED);
+          color: #fff; font-weight: 700; font-size: 15px; text-decoration: none;
+        ">
+          Ativar minha conta
+        </a>
+        <p style="color: #999; font-size: 12px; margin-top: 24px;">
+          Este link expira em 24 horas. Se não reconhece este convite, ignore este email.
+        </p>
+      </div>
+    `,
+  })
 
   res.status(201).json({
     id:      profile.id,
@@ -188,11 +233,53 @@ router.post('/forgot-password', async (req, res) => {
 
   const FRONTEND = process.env.FRONTEND_URL || 'https://pitch-predict.vercel.app'
 
-  // Sempre retorna ok (não revela se o email existe)
-  await supabaseAdmin.auth.resetPasswordForEmail(email, {
-    redirectTo: `${FRONTEND}/auth/callback`,
-  })
+  // Verifica se o usuário existe (sem revelar para o cliente)
+  const { data: profile } = await supabaseAdmin
+    .from('user_profiles')
+    .select('name')
+    .eq('email', email)
+    .single()
 
+  if (profile) {
+    // Gera link de reset via Supabase
+    const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'recovery',
+      email,
+      options: { redirectTo: `${FRONTEND}/auth/callback` },
+    })
+
+    if (!linkErr && linkData) {
+      const resetUrl = linkData.properties.action_link
+      await resend.emails.send({
+        from: 'Pitch Predict <onboarding@resend.dev>',
+        to: email,
+        subject: 'Redefinir senha — Pitch Predict',
+        html: `
+          <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
+            <div style="margin-bottom: 24px;">
+              <span style="font-size: 22px; font-weight: 800;">Pitch Predict</span>
+            </div>
+            <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Redefinir senha</h2>
+            <p style="color: #555; margin-bottom: 24px;">
+              Olá, ${profile.name}! Recebemos uma solicitação para redefinir sua senha.
+            </p>
+            <a href="${resetUrl}" style="
+              display: inline-block; padding: 12px 28px; border-radius: 8px;
+              background: linear-gradient(135deg, #2563EB, #7C3AED);
+              color: #fff; font-weight: 700; font-size: 15px; text-decoration: none;
+            ">
+              Redefinir minha senha
+            </a>
+            <p style="color: #999; font-size: 12px; margin-top: 24px;">
+              Este link expira em 1 hora. Se não solicitou a redefinição, ignore este email.
+            </p>
+          </div>
+        `,
+      })
+    }
+  }
+
+  // Sempre retorna ok (não revela se o email existe)
   res.json({ ok: true, message: 'Se este email estiver cadastrado, você receberá um link em breve.' })
 })
 
