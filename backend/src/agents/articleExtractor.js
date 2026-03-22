@@ -11,15 +11,70 @@
  */
 
 const Anthropic = require('@anthropic-ai/sdk')
+const https     = require('https')
 const supabase  = require('../lib/supabase')
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
+// ─── MiniMax client (OpenAI-compatible, 10x mais barato para volume) ─────────
+const MINIMAX_KEY     = process.env.MINIMAX_API_KEY
+const MINIMAX_URL     = process.env.MINIMAX_BASE_URL || 'https://api.minimaxi.chat/v1'
+const USE_MINIMAX     = !!MINIMAX_KEY   // usa MiniMax se a key estiver configurada
+
+function minimaxChat(prompt) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify({
+      model: 'MiniMax-Text-01',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 1200,
+    })
+    const url  = new URL(MINIMAX_URL + '/chat/completions')
+    const req  = https.request({
+      hostname: url.hostname,
+      path:     url.pathname,
+      method:   'POST',
+      headers: {
+        'Content-Type':   'application/json',
+        'Authorization':  `Bearer ${MINIMAX_KEY}`,
+        'Content-Length': Buffer.byteLength(data),
+      },
+    }, (res) => {
+      let body = ''
+      res.on('data', c => body += c)
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(body)
+          resolve(j.choices?.[0]?.message?.content || '')
+        } catch { resolve('') }
+      })
+    })
+    req.on('error', reject)
+    req.write(data)
+    req.end()
+  })
+}
+
+// Wrapper unificado — usa MiniMax para volume, Claude como fallback
+async function llmChat(prompt, { useMinimax = USE_MINIMAX } = {}) {
+  if (useMinimax) {
+    try {
+      return await minimaxChat(prompt)
+    } catch (e) {
+      console.warn('[llm] MiniMax falhou, fallback Claude:', e.message)
+    }
+  }
+  const res = await client.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 1200,
+    messages: [{ role: 'user', content: prompt }],
+  })
+  return res.content[0]?.text || ''
+}
+
 // ─── Concorrência ────────────────────────────────────────────────────────────
-// Concorrência moderada — saldo $5.74, ~$0.004/edição = ~1.400 edições possíveis
-// 5 simultâneas × 2.500 tokens = ~12.5k tokens/chunk com 500ms delay
-const CONCURRENCY   = 5
-const CHUNK_DELAY_MS = 500  // ms de pausa entre cada chunk (controla token rate)
+// MiniMax não tem rate limit restritivo → pode aumentar concorrência
+const CONCURRENCY   = USE_MINIMAX ? 10 : 5
+const CHUNK_DELAY_MS = USE_MINIMAX ? 200 : 500
 
 // Mapas de promessas pendentes — evita race condition ao criar brand/agency nova
 // quando múltiplas coroutines processam ao mesmo tempo
@@ -251,17 +306,8 @@ async function extractFromArticle(article) {
   // Trunca para evitar tokens excessivos (~8K chars = ~2K tokens)
   const truncated = text.slice(0, 8000)
 
-  const response = await client.messages.create({
-    model: 'claude-haiku-4-5',
-    max_tokens: 1500,
-    system: SYSTEM_PROMPT,
-    messages: [{
-      role: 'user',
-      content: `Artigo: "${article.title}"\nData: ${article.published_at?.slice(0, 10) || 'desconhecida'}\nFonte: ${article.source_name}\n\nTexto:\n${truncated}`,
-    }]
-  })
-
-  const raw = response.content[0]?.text || '{}'
+  const prompt = `${SYSTEM_PROMPT}\n\nArtigo: "${article.title}"\nData: ${article.published_at?.slice(0, 10) || 'desconhecida'}\nFonte: ${article.source_name}\n\nTexto:\n${truncated}`
+  const raw = await llmChat(prompt)
 
   // Tenta parse direto, depois com regex (fallback)
   try {
