@@ -162,7 +162,8 @@
       "Bash(curl -s -X POST https://pitch-predict-production.up.railway.app/api/auth/forgot-password -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"grazzi81@gmail.com\"\"}')",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://pitch-predict-production.up.railway.app/api/brands)",
       "Bash(head -20 grep -rn \"login\\\\|VITE_API\" /Users/tennet/Claude/pitch-predict/frontend/src/pages/Login.jsx)",
-      "Bash(railway variables:*)"
+      "Bash(railway variables:*)",
+      "Bash(node --check /Users/tennet/Claude/pitch-predict/backend/src/agents/currentAgencyAgent.js)"
     ]
   },
   "enableAllProjectMcpServers": true,
