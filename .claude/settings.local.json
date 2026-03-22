@@ -124,7 +124,11 @@
       "Bash(curl -s -X POST http://localhost:3001/api/agent/extract-editions-all -H \"Content-Type: application/json\" -d '{\"\"\"\"since_year\"\"\"\": 2022, \"\"\"\"batch\"\"\"\": 1200}')",
       "mcp__supabase__get_project",
       "mcp__supabase__get_publishable_keys",
-      "Bash(curl -s -X POST http://localhost:3001/api/auth/login -H \"Content-Type: application/json\" -d '{\"\"\"\"email\"\"\"\":\"\"\"\"grazzi81@gmail.com\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"PitchAdmin@2026\"\"\"\"}')"
+      "Bash(curl -s -X POST http://localhost:3001/api/auth/login -H \"Content-Type: application/json\" -d '{\"\"\"\"email\"\"\"\":\"\"\"\"grazzi81@gmail.com\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"PitchAdmin@2026\"\"\"\"}')",
+      "Bash(pkill -f 'node src/server.js')",
+      "Bash(pkill -f node.*server.js)",
+      "Bash(lsof -ti:3001)",
+      "Bash(xargs kill:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
