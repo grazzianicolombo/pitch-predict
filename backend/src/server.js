@@ -7,7 +7,8 @@ if (!process.env.DOPPLER_PROJECT && !process.env.SUPABASE_URL) {
 }
 
 const express = require('express')
-const cors = require('cors')
+const cors    = require('cors')
+const helmet  = require('helmet')
 
 const brandsRouter      = require('./routes/brands')
 const sourcesRouter     = require('./routes/sources')
@@ -23,15 +24,26 @@ const { requireAuth }   = require('./lib/auth')
 const app = express()
 const PORT = process.env.PORT || 3001
 
-// CORS fail-closed: em produção ALLOWED_ORIGINS é obrigatório
+// ── Segurança: headers HTTP via helmet ────────────────────────────────────────
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }, // permite assets de CDN
+  contentSecurityPolicy: false, // API pura — CSP não se aplica
+}))
+
+// ── CORS fail-closed ──────────────────────────────────────────────────────────
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim())
   : []
 
 if (allowedOrigins.length === 0) {
-  // Em dev local sem Doppler, permite localhost — nunca permite wildcard '*'
+  if (process.env.NODE_ENV === 'production') {
+    // Em produção sem ALLOWED_ORIGINS configurado é erro crítico — aborta
+    console.error('[CORS] FATAL: ALLOWED_ORIGINS não definido em produção. Configure via Doppler.')
+    process.exit(1)
+  }
+  // Em dev local, permite apenas localhost
   allowedOrigins.push('http://localhost:5173', 'http://localhost:3000')
-  console.warn('[CORS] ALLOWED_ORIGINS não definido — permitindo apenas localhost. Configure via Doppler em produção.')
+  console.warn('[CORS] ALLOWED_ORIGINS não definido — permitindo apenas localhost.')
 }
 
 app.use(cors({

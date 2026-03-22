@@ -86,17 +86,21 @@ router.post('/jobs/:sourceId/run', async (req, res) => {
       })
     } catch (e) {
       const duration = Date.now() - startedAt
-      await supabase.from('source_jobs').update({
-        last_run_status: 'error',
-        last_run_at:     new Date().toISOString(),
-      }).eq('source_id', sourceId)
-      await supabase.from('source_logs').insert({
-        source_id:   sourceId,
-        status:      'error',
-        duration_ms: duration,
-        error_msg:   e.message,
-      })
       console.error(`[source job ${sourceId}] erro:`, e.message)
+      try {
+        await supabase.from('source_jobs').update({
+          last_run_status: 'error',
+          last_run_at:     new Date().toISOString(),
+        }).eq('source_id', sourceId)
+        await supabase.from('source_logs').insert({
+          source_id:   sourceId,
+          status:      'error',
+          duration_ms: duration,
+          error_msg:   e.message?.slice(0, 500),
+        })
+      } catch (logErr) {
+        console.error(`[source job ${sourceId}] falha ao gravar log de erro:`, logErr.message)
+      }
     }
   })
 
@@ -142,17 +146,21 @@ router.post('/jobs/propmark/full-crawl', async (req, res) => {
       })
     } catch (e) {
       const duration = Date.now() - startedAt
-      await supabase.from('source_jobs').update({
-        last_run_status: 'error',
-        last_run_at:     new Date().toISOString(),
-      }).eq('source_id', 'propmark')
-      await supabase.from('source_logs').insert({
-        source_id:   'propmark',
-        status:      'error',
-        duration_ms: duration,
-        error_msg:   e.message,
-      })
       console.error('[propmark full-crawl] erro:', e.message)
+      try {
+        await supabase.from('source_jobs').update({
+          last_run_status: 'error',
+          last_run_at:     new Date().toISOString(),
+        }).eq('source_id', 'propmark')
+        await supabase.from('source_logs').insert({
+          source_id:   'propmark',
+          status:      'error',
+          duration_ms: duration,
+          error_msg:   e.message?.slice(0, 500),
+        })
+      } catch (logErr) {
+        console.error('[propmark full-crawl] falha ao gravar log:', logErr.message)
+      }
     }
   })
 
@@ -192,8 +200,19 @@ router.get('/jobs/stats', async (req, res) => {
 router.post('/upload-scopen', upload.single('pdf'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' })
 
-  const origName = req.file.originalname
-  const destName = `${Date.now()}_${origName.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+  // Valida magic bytes: PDF começa com %PDF (0x25 0x50 0x44 0x46)
+  const buf = Buffer.alloc(4)
+  const fd  = fs.openSync(req.file.path, 'r')
+  fs.readSync(fd, buf, 0, 4, 0)
+  fs.closeSync(fd)
+  if (buf.toString('ascii') !== '%PDF') {
+    fs.unlinkSync(req.file.path)
+    return res.status(400).json({ error: 'Arquivo inválido — somente PDFs reais são aceitos' })
+  }
+
+  // Nome seguro: UUID + extensão fixa — nunca usa o nome original
+  const { randomUUID } = require('crypto')
+  const destName = `${randomUUID()}.pdf`
   const destPath = path.join(uploadDir, destName)
 
   fs.renameSync(req.file.path, destPath)
@@ -233,13 +252,15 @@ async function runSource(sourceId) {
   // Dispatcher — chama o scraper correto para cada fonte
   switch (sourceId) {
     case 'mm_website': {
-      const { execSync } = require('child_process')
+      const { execFileSync } = require('child_process')
       const archiveDir = path.join(__dirname, '../../../data/archive')
       const since = new Date()
       since.setDate(since.getDate() - 2)
       const sinceStr = since.toISOString().slice(0, 10)
-      execSync(
-        `python3 ${archiveDir}/scrape_website.py --since ${sinceStr} --workers 6`,
+      // execFileSync: args como array — imune a command injection
+      execFileSync(
+        'python3',
+        [path.join(archiveDir, 'scrape_website.py'), '--since', sinceStr, '--workers', '6'],
         { timeout: 120_000 }
       )
       // Após crawl, extrai marcas/agências das novas edições em background

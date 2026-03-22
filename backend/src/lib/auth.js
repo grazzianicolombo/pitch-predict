@@ -56,6 +56,7 @@ async function requireAuth(req, res, next) {
 
     next()
   } catch (e) {
+    console.error('[auth] Token validation error:', e?.message || e)
     return res.status(401).json({ error: 'Erro ao validar token' })
   }
 }

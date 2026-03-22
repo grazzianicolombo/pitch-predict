@@ -2,6 +2,14 @@ const express = require('express')
 const router = express.Router()
 const supabase = require('../lib/supabase')
 
+function safeUrl(val) {
+  if (!val) return null
+  try { new URL(val); return val } catch { return null }
+}
+function safeStr(val, max = 255) {
+  return val ? String(val).trim().slice(0, max) : null
+}
+
 // GET /api/brands — listar com líder atual
 router.get('/', async (req, res) => {
   const { data, error } = await supabase
@@ -28,11 +36,23 @@ router.post('/', async (req, res) => {
   const { name, segment, group_name, website, notes,
     country_of_origin, revenue_estimate, marketing_team_size,
     is_listed, year_in_brazil, linkedin_company_url, instagram_handle } = req.body
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'name obrigatório' })
   const { data, error } = await supabase
     .from('brands')
-    .insert({ name, segment, group_name, website, notes,
-      country_of_origin, revenue_estimate, marketing_team_size,
-      is_listed, year_in_brazil, linkedin_company_url, instagram_handle })
+    .insert({
+      name:                safeStr(name),
+      segment:             safeStr(segment),
+      group_name:          safeStr(group_name),
+      website:             safeUrl(website),
+      notes:               safeStr(notes, 2000),
+      country_of_origin:   safeStr(country_of_origin),
+      revenue_estimate:    safeStr(revenue_estimate),
+      marketing_team_size: marketing_team_size != null ? parseInt(marketing_team_size) : null,
+      is_listed:           !!is_listed,
+      year_in_brazil:      year_in_brazil != null ? parseInt(year_in_brazil) : null,
+      linkedin_company_url: safeUrl(linkedin_company_url),
+      instagram_handle:    safeStr(instagram_handle),
+    })
     .select()
     .single()
   if (error) return res.status(500).json({ error: error.message })
@@ -46,10 +66,21 @@ router.put('/:id', async (req, res) => {
     is_listed, year_in_brazil, linkedin_company_url, instagram_handle } = req.body
   const { data, error } = await supabase
     .from('brands')
-    .update({ name, segment, group_name, website, notes,
-      country_of_origin, revenue_estimate, marketing_team_size,
-      is_listed, year_in_brazil, linkedin_company_url, instagram_handle,
-      updated_at: new Date().toISOString() })
+    .update({
+      name:                safeStr(name),
+      segment:             safeStr(segment),
+      group_name:          safeStr(group_name),
+      website:             safeUrl(website),
+      notes:               safeStr(notes, 2000),
+      country_of_origin:   safeStr(country_of_origin),
+      revenue_estimate:    safeStr(revenue_estimate),
+      marketing_team_size: marketing_team_size != null ? parseInt(marketing_team_size) : null,
+      is_listed:           is_listed != null ? !!is_listed : undefined,
+      year_in_brazil:      year_in_brazil != null ? parseInt(year_in_brazil) : null,
+      linkedin_company_url: safeUrl(linkedin_company_url),
+      instagram_handle:    safeStr(instagram_handle),
+      updated_at:          new Date().toISOString(),
+    })
     .eq('id', req.params.id)
     .select()
     .single()

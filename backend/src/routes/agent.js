@@ -13,6 +13,15 @@ function newJobId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 }
 
+// Mutex simples para evitar race condition na criação de jobs
+let _jobLock = false
+function tryAcquireJobLock() {
+  if (_jobLock) return false
+  _jobLock = true
+  return true
+}
+function releaseJobLock() { _jobLock = false }
+
 // ─── POST /api/agent/validate-agencies ─────────────────────────────────────
 // Inicia o agente em background e retorna job_id imediatamente
 router.post('/validate-agencies', (req, res) => {
@@ -20,14 +29,20 @@ router.post('/validate-agencies', (req, res) => {
     return res.status(503).json({ error: 'ANTHROPIC_API_KEY não configurada no .env do backend' })
   }
 
-  // Verifica se já há um job rodando
+  // Verifica se já há um job rodando (com mutex para evitar race condition)
+  if (!tryAcquireJobLock()) {
+    const running = Object.values(jobs).find(j => j.status === 'running')
+    return res.json({ job_id: running?.id, status: 'running', message: 'Agente já em execução' })
+  }
   const running = Object.values(jobs).find(j => j.status === 'running')
   if (running) {
+    releaseJobLock()
     return res.json({ job_id: running.id, status: 'running', message: 'Agente já em execução' })
   }
 
   const jobId = newJobId()
   jobs[jobId] = { id: jobId, status: 'running', progress: 0, total: 0, result: null, error: null, startedAt: new Date() }
+  releaseJobLock()
 
   // Executa em background (não bloqueia a resposta HTTP)
   ;(async () => {
@@ -179,11 +194,19 @@ router.get('/archive/stats', async (req, res) => {
 
   const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'))
 
-  // Conta text.txt por ano
-  const { execSync } = require('child_process')
+  // Conta text.txt por ano — usando fs.readdirSync recursivo (sem shell)
   let extracted = 0
   try {
-    extracted = parseInt(execSync(`find ${archiveDir} -name text.txt | wc -l`).toString().trim())
+    const countFiles = (dir, name) => {
+      let count = 0
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) count += countFiles(full, name)
+        else if (entry.name === name) count++
+      }
+      return count
+    }
+    extracted = countFiles(archiveDir, 'text.txt')
   } catch (e) {}
 
   // Distribuição por ano

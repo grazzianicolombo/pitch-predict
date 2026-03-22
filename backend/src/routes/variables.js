@@ -10,9 +10,11 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   const { name, weight, type, description, active } = req.body
+  if (!name) return res.status(400).json({ error: 'name obrigatório' })
+  const safeWeight = Math.min(Math.max(parseFloat(weight) || 1.0, 0), 100)
   const { data, error } = await supabase
     .from('model_variables')
-    .insert({ name, weight, type, description, active })
+    .insert({ name, weight: safeWeight, type, description, active })
     .select()
     .single()
   if (error) return res.status(500).json({ error: error.message })
@@ -21,9 +23,12 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   const { name, weight, type, description, active } = req.body
+  const safeWeight = weight !== undefined ? Math.min(Math.max(parseFloat(weight), 0), 100) : undefined
+  const updates = { name, type, description, active }
+  if (safeWeight !== undefined) updates.weight = safeWeight
   const { data, error } = await supabase
     .from('model_variables')
-    .update({ name, weight, type, description, active })
+    .update(updates)
     .eq('id', req.params.id)
     .select()
     .single()

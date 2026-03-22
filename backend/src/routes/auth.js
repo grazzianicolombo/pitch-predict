@@ -14,7 +14,33 @@ const express      = require('express')
 const router       = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const nodemailer   = require('nodemailer')
+const rateLimit    = require('express-rate-limit')
 const { requireAuth, requireRole } = require('../lib/auth')
+
+// ─── Rate limiters ────────────────────────────────────────────────────────────
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas. Aguarde 15 minutos e tente novamente.' },
+})
+
+const passwordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas de redefinição. Aguarde 1 hora.' },
+})
+
+// ─── Validação de senha ───────────────────────────────────────────────────────
+function validatePassword(password) {
+  if (!password || password.length < 12) return 'Senha deve ter mínimo 12 caracteres'
+  if (!/[A-Z]/.test(password)) return 'Senha deve conter pelo menos uma letra maiúscula'
+  if (!/[0-9]/.test(password)) return 'Senha deve conter pelo menos um número'
+  return null
+}
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -42,7 +68,7 @@ async function sendEmail({ to, subject, html }) {
 
 // ─── Login ───────────────────────────────────────────────────────────────────
 
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
   const { email, password } = req.body
   if (!email || !password) {
     return res.status(400).json({ error: 'Email e senha obrigatórios' })
@@ -79,7 +105,7 @@ router.post('/login', async (req, res) => {
 
 // ─── Refresh token ───────────────────────────────────────────────────────────
 
-router.post('/refresh', async (req, res) => {
+router.post('/refresh', authLimiter, async (req, res) => {
   const { refresh_token } = req.body
   if (!refresh_token) return res.status(400).json({ error: 'refresh_token obrigatório' })
 
@@ -219,10 +245,11 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
 
 // ─── Define senha via token do email (convite / reset) ────────────────────────
 
-router.post('/set-password', async (req, res) => {
+router.post('/set-password', passwordLimiter, async (req, res) => {
   const { token, password } = req.body
-  if (!token || !password || password.length < 8) {
-    return res.status(400).json({ error: 'Token e senha (mín. 8 caracteres) obrigatórios' })
+  const passErr = validatePassword(password)
+  if (!token || passErr) {
+    return res.status(400).json({ error: passErr || 'Token obrigatório' })
   }
 
   // Valida o token e obtém o usuário
@@ -244,7 +271,7 @@ router.post('/set-password', async (req, res) => {
 
 // ─── Esqueci minha senha ──────────────────────────────────────────────────────
 
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', passwordLimiter, async (req, res) => {
   const { email } = req.body
   if (!email) return res.status(400).json({ error: 'Email obrigatório' })
 
@@ -301,10 +328,11 @@ router.post('/forgot-password', async (req, res) => {
 
 // ─── Alterar senha (usuário logado) ──────────────────────────────────────────
 
-router.post('/change-password', requireAuth, async (req, res) => {
+router.post('/change-password', requireAuth, passwordLimiter, async (req, res) => {
   const { password } = req.body
-  if (!password || password.length < 8) {
-    return res.status(400).json({ error: 'Nova senha deve ter mínimo 8 caracteres' })
+  const passErr = validatePassword(password)
+  if (passErr) {
+    return res.status(400).json({ error: passErr })
   }
 
   const { error } = await supabaseAdmin.auth.admin.updateUserById(req.user.id, { password })
@@ -319,10 +347,23 @@ router.patch('/users/:id', requireAuth, requireRole('superadmin'), async (req, r
   const { id } = req.params
   const { role, active, name } = req.body
 
+  // Valida existência antes de atualizar (evita IDOR silencioso)
+  const { data: existing, error: fetchErr } = await supabaseAdmin
+    .from('user_profiles')
+    .select('id')
+    .eq('id', id)
+    .single()
+  if (fetchErr || !existing) return res.status(404).json({ error: 'Usuário não encontrado' })
+
+  // Valida role se fornecido
+  if (role !== undefined && !['superadmin', 'user'].includes(role)) {
+    return res.status(400).json({ error: 'role inválido' })
+  }
+
   const updates = {}
   if (role   !== undefined) updates.role   = role
-  if (active !== undefined) updates.active = active
-  if (name   !== undefined) updates.name   = name
+  if (active !== undefined) updates.active = !!active
+  if (name   !== undefined) updates.name   = String(name).trim().slice(0, 100)
 
   const { data, error } = await supabaseAdmin
     .from('user_profiles')
