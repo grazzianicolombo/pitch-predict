@@ -18,10 +18,13 @@ function safeInt(val, min = 0, max = 99999) {
 
 // GET /api/agencies
 router.get('/', async (req, res) => {
+  const limit  = Math.min(parseInt(req.query.limit)  || 200, 500)
+  const offset = Math.max(parseInt(req.query.offset) || 0,   0)
   const { data, error } = await supabase
     .from('agency_profiles')
     .select('id, name, group_name, holding, category, leadership, specialties, website, headquarters, status')
     .order('name')
+    .range(offset, offset + limit - 1)
   if (error) return dbError(res, error, 'agencies')
   res.json(data)
 })

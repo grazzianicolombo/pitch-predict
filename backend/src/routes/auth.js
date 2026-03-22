@@ -16,6 +16,40 @@ const { createClient } = require('@supabase/supabase-js')
 const nodemailer   = require('nodemailer')
 const rateLimit    = require('express-rate-limit')
 const { requireAuth, requireRole } = require('../lib/auth')
+const { dbError } = require('../lib/routeHelpers')
+const { securityLog, EVENTS } = require('../lib/securityLog')
+
+// ─── Cookie helpers ───────────────────────────────────────────────────────────
+
+const IS_PROD = process.env.NODE_ENV === 'production'
+
+// ACCESS TOKEN — curta duração, lido pelo requireAuth
+function setAuthCookies(res, session, remember = true) {
+  const accessMaxAge  = 60 * 60                          // 1 hora (segundos)
+  const refreshMaxAge = remember
+    ? 30 * 24 * 60 * 60  // 30 dias (lembrar)
+    :      24 * 60 * 60  // 24 horas (sessão)
+
+  res.cookie('pp_access_token', session.access_token, {
+    httpOnly: true,
+    secure:   IS_PROD,
+    sameSite: 'strict',
+    path:     '/',
+    maxAge:   accessMaxAge * 1000, // ms
+  })
+  res.cookie('pp_refresh_token', session.refresh_token, {
+    httpOnly: true,
+    secure:   IS_PROD,
+    sameSite: 'strict',
+    path:     '/api/auth/refresh', // cookie enviado SOMENTE ao endpoint de refresh
+    maxAge:   refreshMaxAge * 1000,
+  })
+}
+
+function clearAuthCookies(res) {
+  res.clearCookie('pp_access_token',  { httpOnly: true, secure: IS_PROD, sameSite: 'strict', path: '/' })
+  res.clearCookie('pp_refresh_token', { httpOnly: true, secure: IS_PROD, sameSite: 'strict', path: '/api/auth/refresh' })
+}
 
 // ─── Rate limiters ────────────────────────────────────────────────────────────
 const authLimiter = rateLimit({
@@ -39,6 +73,7 @@ function validatePassword(password) {
   if (!password || password.length < 12) return 'Senha deve ter mínimo 12 caracteres'
   if (!/[A-Z]/.test(password)) return 'Senha deve conter pelo menos uma letra maiúscula'
   if (!/[0-9]/.test(password)) return 'Senha deve conter pelo menos um número'
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?`~]/.test(password)) return 'Senha deve conter pelo menos um caractere especial (!@#$%...)'
   return null
 }
 
@@ -69,13 +104,14 @@ async function sendEmail({ to, subject, html }) {
 // ─── Login ───────────────────────────────────────────────────────────────────
 
 router.post('/login', authLimiter, async (req, res) => {
-  const { email, password } = req.body
+  const { email, password, remember = true } = req.body
   if (!email || !password) {
     return res.status(400).json({ error: 'Email e senha obrigatórios' })
   }
 
   const { data, error } = await supabaseAdmin.auth.signInWithPassword({ email, password })
   if (error) {
+    securityLog(req, EVENTS.LOGIN_FAILURE, { email, reason: 'invalid_credentials' })
     return res.status(401).json({ error: 'Email ou senha incorretos' })
   }
 
@@ -87,13 +123,13 @@ router.post('/login', authLimiter, async (req, res) => {
     .single()
 
   if (!profile?.active) {
+    securityLog(req, EVENTS.LOGIN_FAILURE, { email, userId: data.user.id, reason: 'account_disabled' })
     return res.status(403).json({ error: 'Usuário desativado' })
   }
 
+  securityLog(req, EVENTS.LOGIN_SUCCESS, { userId: data.user.id, email })
+  setAuthCookies(res, data.session, remember !== false)
   res.json({
-    access_token: data.session.access_token,
-    refresh_token: data.session.refresh_token,
-    expires_at: data.session.expires_at,
     user: {
       id:    data.user.id,
       email: data.user.email,
@@ -106,7 +142,8 @@ router.post('/login', authLimiter, async (req, res) => {
 // ─── Refresh token ───────────────────────────────────────────────────────────
 
 router.post('/refresh', authLimiter, async (req, res) => {
-  const { refresh_token } = req.body
+  // Accept refresh token from httpOnly cookie (preferred) or request body (backward compat)
+  const refresh_token = req.cookies?.pp_refresh_token || req.body?.refresh_token
   if (!refresh_token) return res.status(400).json({ error: 'refresh_token obrigatório' })
 
   const { data, error } = await supabaseAdmin.auth.refreshSession({ refresh_token })
@@ -120,10 +157,8 @@ router.post('/refresh', authLimiter, async (req, res) => {
 
   if (!profile?.active) return res.status(403).json({ error: 'Usuário desativado' })
 
+  setAuthCookies(res, data.session)
   res.json({
-    access_token:  data.session.access_token,
-    refresh_token: data.session.refresh_token,
-    expires_at:    data.session.expires_at,
     user: {
       id:    data.user.id,
       email: data.user.email,
@@ -137,6 +172,8 @@ router.post('/refresh', authLimiter, async (req, res) => {
 
 router.post('/logout', requireAuth, async (req, res) => {
   await supabaseAdmin.auth.admin.signOut(req.user.id)
+  securityLog(req, EVENTS.LOGOUT, { userId: req.user.id })
+  clearAuthCookies(res)
   res.json({ ok: true })
 })
 
@@ -159,7 +196,7 @@ router.get('/users', requireAuth, requireRole('superadmin'), async (req, res) =>
     .select('id, user_id, name, email, role, active, created_at, last_login')
     .order('created_at', { ascending: false })
 
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'auth-list-users')
   res.json(data)
 })
 
@@ -188,7 +225,7 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
     email_confirm: false,
     user_metadata: { name },
   })
-  if (authErr) return res.status(400).json({ error: authErr.message })
+  if (authErr) return dbError(res, authErr, 'auth-create-user')
 
   // Cria perfil
   const { data: profile, error: profErr } = await supabaseAdmin
@@ -200,7 +237,7 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
   if (profErr) {
     // Rollback: remove o usuário do Auth se o perfil falhou
     await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
-    return res.status(500).json({ error: profErr.message })
+    return dbError(res, profErr, 'auth-create-profile')
   }
 
   // Gera link de convite para o usuário definir a senha
@@ -209,7 +246,9 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
     email,
     options: { redirectTo: `${frontendUrl}/auth/callback` },
   })
-  if (linkErr) return res.status(500).json({ error: linkErr.message })
+  if (linkErr) return dbError(res, linkErr, 'auth-generate-invite-link')
+
+  securityLog(req, EVENTS.USER_CREATED, { createdBy: req.user.id, newUserId: authData.user.id, email, role })
 
   // Responde imediatamente — envia email em background
   res.status(201).json({
@@ -264,7 +303,7 @@ router.post('/set-password', passwordLimiter, async (req, res) => {
 
   // Atualiza a senha
   const { error: updErr } = await supabaseAdmin.auth.admin.updateUserById(user.id, { password })
-  if (updErr) return res.status(500).json({ error: updErr.message })
+  if (updErr) return dbError(res, updErr, 'auth-set-password')
 
   // Garante que o perfil existe e está ativo
   await supabaseAdmin
@@ -272,6 +311,7 @@ router.post('/set-password', passwordLimiter, async (req, res) => {
     .update({ active: true })
     .eq('user_id', user.id)
 
+  securityLog(req, EVENTS.PASSWORD_SET, { userId: user.id })
   res.json({ ok: true, message: 'Senha definida com sucesso' })
 })
 
@@ -280,6 +320,10 @@ router.post('/set-password', passwordLimiter, async (req, res) => {
 router.post('/forgot-password', passwordLimiter, async (req, res) => {
   const { email } = req.body
   if (!email) return res.status(400).json({ error: 'Email obrigatório' })
+
+  // Garante tempo de resposta constante para prevenir enumeração de usuários por timing
+  const MIN_RESPONSE_MS = 600
+  const startedAt = Date.now()
 
   const FRONTEND = process.env.FRONTEND_URL || 'http://localhost:5173'
 
@@ -328,7 +372,15 @@ router.post('/forgot-password', passwordLimiter, async (req, res) => {
     }
   }
 
+  // Loga a tentativa de reset (sem revelar se o email existe)
+  securityLog(req, EVENTS.PASSWORD_RESET_REQUEST, { email: profile ? email : '[unknown]' })
+
   // Sempre retorna ok (não revela se o email existe)
+  // Aguarda o tempo mínimo antes de responder para evitar timing attack
+  const elapsed = Date.now() - startedAt
+  if (elapsed < MIN_RESPONSE_MS) {
+    await new Promise(r => setTimeout(r, MIN_RESPONSE_MS - elapsed))
+  }
   res.json({ ok: true, message: 'Se este email estiver cadastrado, você receberá um link em breve.' })
 })
 
@@ -342,8 +394,13 @@ router.post('/change-password', requireAuth, passwordLimiter, async (req, res) =
   }
 
   const { error } = await supabaseAdmin.auth.admin.updateUserById(req.user.id, { password })
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'auth-change-password')
 
+  // Invalida todas as sessões ativas exceto a atual (scope: 'others')
+  // Garante que tokens roubados não permaneçam válidos após troca de senha
+  await supabaseAdmin.auth.admin.signOut(req.user.id, { scope: 'others' }).catch(() => {})
+
+  securityLog(req, EVENTS.PASSWORD_CHANGE, { userId: req.user.id })
   res.json({ ok: true, message: 'Senha alterada com sucesso' })
 })
 
@@ -378,7 +435,11 @@ router.patch('/users/:id', requireAuth, requireRole('superadmin'), async (req, r
     .select()
     .single()
 
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'auth-patch-user')
+
+  if (updates.role)    securityLog(req, EVENTS.ROLE_CHANGED,     { changedBy: req.user.id, targetId: id, newRole: updates.role })
+  if (updates.active === false) securityLog(req, EVENTS.USER_DEACTIVATED, { changedBy: req.user.id, targetId: id })
+
   res.json(data)
 })
 
@@ -402,12 +463,13 @@ router.delete('/users/:id', requireAuth, requireRole('superadmin'), async (req, 
     .delete()
     .eq('id', id)
 
-  if (delProfErr) return res.status(500).json({ error: delProfErr.message })
+  if (delProfErr) return dbError(res, delProfErr, 'auth-delete-profile')
 
   // Remove o usuário do Supabase Auth
   const { error: delAuthErr } = await supabaseAdmin.auth.admin.deleteUser(profile.user_id)
-  if (delAuthErr) return res.status(500).json({ error: delAuthErr.message })
+  if (delAuthErr) return dbError(res, delAuthErr, 'auth-delete-user')
 
+  securityLog(req, EVENTS.USER_DELETED, { deletedBy: req.user.id, targetId: id })
   res.json({ ok: true, message: 'Usuário removido' })
 })
 

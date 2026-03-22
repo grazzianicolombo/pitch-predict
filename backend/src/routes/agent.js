@@ -9,6 +9,7 @@ const { runExtraction, runEditionExtraction } = require('../agents/articleExtrac
 
 // ─── Job store persistente ─────────────────────────────────────────────────
 const { jobs, persist } = require('../lib/jobStore')
+const { requireValidId, dbError } = require('../lib/routeHelpers')
 
 // Job IDs com entropia criptográfica (UUID v4 — 122 bits)
 function newJobId() { return randomUUID() }
@@ -124,27 +125,27 @@ router.get('/queue', async (req, res) => {
     .select('*')
     .order('created_at', { ascending: false })
 
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'agent-queue')
   res.json(data)
 })
 
 // ─── POST /api/agent/queue/:id/approve ─────────────────────────────────────
-router.post('/queue/:id/approve', async (req, res) => {
+router.post('/queue/:id/approve', requireValidId, async (req, res) => {
   try {
     await applySuggestion(req.params.id)
     res.json({ success: true })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    return dbError(res, err, 'agent-queue-approve')
   }
 })
 
 // ─── POST /api/agent/queue/:id/reject ──────────────────────────────────────
-router.post('/queue/:id/reject', async (req, res) => {
+router.post('/queue/:id/reject', requireValidId, async (req, res) => {
   try {
     await rejectSuggestion(req.params.id)
     res.json({ success: true })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    return dbError(res, err, 'agent-queue-reject')
   }
 })
 
@@ -160,7 +161,9 @@ router.post('/extract-archive', agentLimiter, (req, res) => {
     return res.json({ job_id: running.id, status: 'running', message: 'Extração já em andamento' })
   }
 
-  const { yearFrom = 2015, yearTo = 2017, limit = 50 } = req.body
+  const yearFrom = Math.min(Math.max(parseInt(req.body.yearFrom) || 2015, 1950), 2030)
+  const yearTo   = Math.min(Math.max(parseInt(req.body.yearTo)   || 2017, 1950), 2030)
+  const limit    = Math.min(Math.max(parseInt(req.body.limit)    || 50,      1), 500)
   const jobId = newJobId()
   jobs[jobId] = {
     id: jobId, type: 'archive', status: 'running',
@@ -244,7 +247,7 @@ router.post('/recrawl-articles', (req, res) => {
     return res.json({ job_id: running.id, status: 'running', message: 'Recrawl já em andamento' })
   }
 
-  const { limit = 200 } = req.body
+  const limit = Math.min(Math.max(parseInt(req.body.limit) || 200, 1), 1000)
   const jobId = newJobId()
   jobs[jobId] = {
     id: jobId, type: 'recrawl', status: 'running',

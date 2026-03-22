@@ -3,13 +3,6 @@ import api from '../services/api'
 
 const AuthContext = createContext(null)
 
-const AUTH_KEY = 'pp_auth'
-
-function getStorage() {
-  // Usa localStorage se "lembrar" foi marcado, senão sessionStorage
-  return localStorage.getItem('pp_remember') === 'false' ? sessionStorage : localStorage
-}
-
 const REFRESH_INTERVAL_MS = 50 * 60 * 1000 // 50 minutos
 
 export function AuthProvider({ children }) {
@@ -18,19 +11,12 @@ export function AuthProvider({ children }) {
   const refreshTimer          = useRef(null)
 
   async function refreshToken() {
-    const stored = getStorage().getItem(AUTH_KEY) || localStorage.getItem(AUTH_KEY)
-    if (!stored) return
     try {
-      const auth = JSON.parse(stored)
-      if (!auth.refresh_token) return
-      const { data } = await api.post('/auth/refresh', { refresh_token: auth.refresh_token })
-      getStorage().setItem(AUTH_KEY, JSON.stringify(data))
-      api.defaults.headers.common['Authorization'] = `Bearer ${data.access_token}`
+      // O cookie pp_refresh_token é enviado automaticamente (withCredentials)
+      const { data } = await api.post('/auth/refresh', {})
       setUser(data.user)
     } catch (err) {
       if (err?.response?.status === 401 || err?.response?.status === 403) {
-        getStorage().removeItem(AUTH_KEY)
-        localStorage.removeItem(AUTH_KEY)
         setUser(null)
         clearInterval(refreshTimer.current)
       }
@@ -43,65 +29,30 @@ export function AuthProvider({ children }) {
     refreshTimer.current = setInterval(refreshToken, REFRESH_INTERVAL_MS)
   }
 
-  // Restaura sessão (com refresh automático se expirado)
+  // Restaura sessão chamando /auth/me — o cookie httpOnly é enviado automaticamente
   useEffect(() => {
     async function restoreSession() {
-      const stored = getStorage().getItem(AUTH_KEY) || localStorage.getItem(AUTH_KEY)
-      if (stored) {
-        try {
-          const auth = JSON.parse(stored)
-          const expiresAt = auth.expires_at ? new Date(auth.expires_at * 1000) : null
-          const now = new Date()
-          const expired = expiresAt && (expiresAt - now) < 5 * 60 * 1000
-
-          if (!expiresAt || expired) {
-            if (auth.refresh_token) {
-              try {
-                const { data } = await api.post('/auth/refresh', { refresh_token: auth.refresh_token })
-                getStorage().setItem(AUTH_KEY, JSON.stringify(data))
-                api.defaults.headers.common['Authorization'] = `Bearer ${data.access_token}`
-                setUser(data.user)
-                startRefreshTimer()
-              } catch (err) {
-                // Só limpa a sessão se for erro de autenticação (401/403), não de rede
-                if (err?.response?.status === 401 || err?.response?.status === 403) {
-                  getStorage().removeItem(AUTH_KEY)
-                  localStorage.removeItem(AUTH_KEY)
-                } else {
-                  // Erro de rede: mantém token e deixa o usuário entrar com o token atual
-                  setUser(auth.user)
-                  api.defaults.headers.common['Authorization'] = `Bearer ${auth.access_token}`
-                }
-              }
-            } else {
-              getStorage().removeItem(AUTH_KEY)
-              localStorage.removeItem(AUTH_KEY)
-            }
-          } else {
-            setUser(auth.user)
-            api.defaults.headers.common['Authorization'] = `Bearer ${auth.access_token}`
-            startRefreshTimer()
-          }
-        } catch {
-          localStorage.removeItem(AUTH_KEY)
-          sessionStorage.removeItem(AUTH_KEY)
+      try {
+        const { data } = await api.get('/auth/me')
+        setUser(data)
+        startRefreshTimer()
+      } catch (err) {
+        // 401 = sem sessão válida — normal no primeiro acesso
+        if (err?.response?.status !== 401) {
+          console.warn('[auth] Falha ao restaurar sessão:', err?.message)
         }
+        setUser(null)
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     }
     restoreSession()
     return () => clearInterval(refreshTimer.current)
   }, [])
 
   async function login(email, password, remember = true) {
-    const { data } = await api.post('/auth/login', { email, password })
-    localStorage.setItem('pp_remember', remember ? 'true' : 'false')
-    const storage = remember ? localStorage : sessionStorage
-    storage.setItem(AUTH_KEY, JSON.stringify(data))
-    // Remove do outro storage se existir
-    if (remember) sessionStorage.removeItem(AUTH_KEY)
-    else localStorage.removeItem(AUTH_KEY)
-    api.defaults.headers.common['Authorization'] = `Bearer ${data.access_token}`
+    const { data } = await api.post('/auth/login', { email, password, remember })
+    // Cookies httpOnly são definidos pelo backend; apenas armazenamos o user no state
     setUser(data.user)
     startRefreshTimer()
     return data.user
@@ -109,10 +60,7 @@ export function AuthProvider({ children }) {
 
   async function logout() {
     try { await api.post('/auth/logout') } catch {}
-    localStorage.removeItem(AUTH_KEY)
-    sessionStorage.removeItem(AUTH_KEY)
-    localStorage.removeItem('pp_remember')
-    delete api.defaults.headers.common['Authorization']
+    // Backend limpa os cookies; apenas resetamos o state local
     clearInterval(refreshTimer.current)
     setUser(null)
   }

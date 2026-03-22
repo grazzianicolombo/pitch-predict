@@ -6,9 +6,11 @@ if (!process.env.DOPPLER_PROJECT && !process.env.SUPABASE_URL) {
   require('dotenv').config()
 }
 
-const express = require('express')
-const cors    = require('cors')
-const helmet  = require('helmet')
+const express      = require('express')
+const cors         = require('cors')
+const helmet       = require('helmet')
+const rateLimit    = require('express-rate-limit')
+const cookieParser = require('cookie-parser')
 
 const brandsRouter      = require('./routes/brands')
 const sourcesRouter     = require('./routes/sources')
@@ -51,8 +53,21 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }))
+app.use(cookieParser())
 app.use(express.json({ limit: '2mb' }))
 app.use(express.urlencoded({ extended: true }))
+
+// ── Rate limit global: 300 req/min por usuário autenticado ou IP ──────────────
+// Protege todos os endpoints CRUD de abuso/scraping em massa
+app.use('/api', rateLimit({
+  windowMs: 60 * 1000,  // 1 minuto
+  max: 300,
+  keyGenerator: (req) => req.headers.authorization?.slice(-20) || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path === '/health',
+  message: { error: 'Muitas requisições. Aguarde 1 minuto e tente novamente.' },
+}))
 
 // Autenticação — pública
 app.use('/api/auth', authRouter)
@@ -73,7 +88,7 @@ require('./scheduler')
 const { autoResume } = require('./lib/autoResume')
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+  res.json({ status: 'ok' })
 })
 
 app.use((req, res) => {

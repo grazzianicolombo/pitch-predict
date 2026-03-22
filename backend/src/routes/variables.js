@@ -1,4 +1,4 @@
-const { dbError } = require('../lib/routeHelpers')
+const { dbError, requireValidId } = require('../lib/routeHelpers')
 const express = require('express')
 const router = express.Router()
 const supabase = require('../lib/supabase')
@@ -22,7 +22,7 @@ router.post('/', async (req, res) => {
   res.status(201).json(data)
 })
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireValidId, async (req, res) => {
   const { name, weight, type, description, active } = req.body
   const safeWeight = weight !== undefined ? Math.min(Math.max(parseFloat(weight), 0), 100) : undefined
   const updates = { name, type, description, active }
@@ -37,7 +37,7 @@ router.put('/:id', async (req, res) => {
   res.json(data)
 })
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireValidId, async (req, res) => {
   const { error } = await supabase.from('model_variables').delete().eq('id', req.params.id)
   if (error) return dbError(res, error, 'variables')
   res.json({ success: true })

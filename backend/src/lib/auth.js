@@ -6,6 +6,7 @@
  */
 
 const { createClient } = require('@supabase/supabase-js')
+const { securityLog, EVENTS } = require('./securityLog')
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -15,10 +16,13 @@ const supabaseAdmin = createClient(
 // ─── Valida token e injeta req.user ──────────────────────────────────────────
 
 async function requireAuth(req, res, next) {
-  const authHeader = req.headers.authorization || ''
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+  // Prefer httpOnly cookie; fall back to Authorization header (API clients / backward compat)
+  const cookieToken = req.cookies?.pp_access_token || null
+  const authHeader  = req.headers.authorization || ''
+  const token = cookieToken || (authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null)
 
   if (!token) {
+    securityLog(req, EVENTS.AUTH_FAILURE, { reason: 'no_token' })
     return res.status(401).json({ error: 'Token não fornecido' })
   }
 
@@ -26,6 +30,7 @@ async function requireAuth(req, res, next) {
     // Valida o token com Supabase Auth
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token)
     if (error || !user) {
+      securityLog(req, EVENTS.INVALID_TOKEN, { reason: error?.message || 'invalid_or_expired' })
       return res.status(401).json({ error: 'Token inválido ou expirado' })
     }
 
@@ -37,9 +42,11 @@ async function requireAuth(req, res, next) {
       .single()
 
     if (!profile) {
+      securityLog(req, EVENTS.AUTH_FAILURE, { userId: user.id, reason: 'profile_not_found' })
       return res.status(403).json({ error: 'Perfil não encontrado' })
     }
     if (!profile.active) {
+      securityLog(req, EVENTS.AUTH_FAILURE, { userId: user.id, reason: 'account_disabled' })
       return res.status(403).json({ error: 'Usuário desativado' })
     }
 
@@ -57,6 +64,7 @@ async function requireAuth(req, res, next) {
     next()
   } catch (e) {
     console.error('[auth] Token validation error:', e?.message || e)
+    securityLog(req, EVENTS.AUTH_FAILURE, { reason: 'exception', detail: e?.message })
     return res.status(401).json({ error: 'Erro ao validar token' })
   }
 }
@@ -69,6 +77,12 @@ function requireRole(...roles) {
       return res.status(401).json({ error: 'Não autenticado' })
     }
     if (!roles.includes(req.role)) {
+      securityLog(req, EVENTS.UNAUTHORIZED_ACCESS, {
+        userId:       req.user?.id,
+        currentRole:  req.role,
+        requiredRoles: roles,
+        path: req.path,
+      })
       return res.status(403).json({ error: 'Permissão insuficiente' })
     }
     next()

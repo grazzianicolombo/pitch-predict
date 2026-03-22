@@ -1,7 +1,7 @@
 const express = require('express')
 const router  = express.Router()
 const supabase = require('../lib/supabase')
-const { requireValidId, dbError } = require('../lib/routeHelpers')
+const { requireValidId, requireValidIds, dbError } = require('../lib/routeHelpers')
 
 function safeUrl(val) {
   if (!val) return null
@@ -19,10 +19,13 @@ function safeInt(val, min, max) {
 
 // GET /api/brands — listar com líder atual
 router.get('/', async (req, res) => {
+  const limit  = Math.min(parseInt(req.query.limit)  || 200, 500)
+  const offset = Math.max(parseInt(req.query.offset) || 0,   0)
   const { data, error } = await supabase
     .from('brands')
     .select('*, marketing_leaders(id, name, title, is_current), agency_history(id, agency, scope, year_start, year_end, status)')
     .order('name')
+    .range(offset, offset + limit - 1)
   if (error) return dbError(res, error, 'brands')
   res.json(data)
 })
@@ -67,7 +70,7 @@ router.post('/', async (req, res) => {
 })
 
 // PUT /api/brands/:id — atualizar
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireValidId, async (req, res) => {
   const { name, segment, group_name, website, notes,
     country_of_origin, revenue_estimate, marketing_team_size,
     is_listed, year_in_brazil, linkedin_company_url, instagram_handle } = req.body
@@ -96,7 +99,7 @@ router.put('/:id', async (req, res) => {
 })
 
 // DELETE /api/brands/:id
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireValidId, async (req, res) => {
   const { error } = await supabase.from('brands').delete().eq('id', req.params.id)
   if (error) return dbError(res, error, 'brands')
   res.json({ success: true })
@@ -105,7 +108,7 @@ router.delete('/:id', async (req, res) => {
 // --- HISTÓRICO DE AGÊNCIAS ---
 
 // POST /api/brands/:id/history
-router.post('/:id/history', async (req, res) => {
+router.post('/:id/history', requireValidId, async (req, res) => {
   const { agency, scope, year_start, year_end, status,
     agency_group, agency_website, month_start, month_end, pitch_type } = req.body
   const { data, error } = await supabase
@@ -119,7 +122,7 @@ router.post('/:id/history', async (req, res) => {
 })
 
 // PUT /api/brands/:id/history/:hid
-router.put('/:id/history/:hid', async (req, res) => {
+router.put('/:id/history/:hid', requireValidIds('id', 'hid'), async (req, res) => {
   const { agency, scope, year_start, year_end, status,
     agency_group, agency_website, month_start, month_end, pitch_type } = req.body
   const { data, error } = await supabase
@@ -134,7 +137,7 @@ router.put('/:id/history/:hid', async (req, res) => {
 })
 
 // DELETE /api/brands/:id/history/:hid
-router.delete('/:id/history/:hid', async (req, res) => {
+router.delete('/:id/history/:hid', requireValidIds('id', 'hid'), async (req, res) => {
   const { error } = await supabase.from('agency_history').delete().eq('id', req.params.hid)
   if (error) return dbError(res, error, 'brands')
   res.json({ success: true })
@@ -143,7 +146,7 @@ router.delete('/:id/history/:hid', async (req, res) => {
 // --- LÍDERES DE MARKETING ---
 
 // POST /api/brands/:id/leaders
-router.post('/:id/leaders', async (req, res) => {
+router.post('/:id/leaders', requireValidId, async (req, res) => {
   const { name, title, linkedin, start_date, end_date, is_current, team_size_estimate } = req.body
   if (is_current) {
     await supabase.from('marketing_leaders').update({ is_current: false }).eq('brand_id', req.params.id)
@@ -158,7 +161,7 @@ router.post('/:id/leaders', async (req, res) => {
 })
 
 // PUT /api/brands/:id/leaders/:lid
-router.put('/:id/leaders/:lid', async (req, res) => {
+router.put('/:id/leaders/:lid', requireValidIds('id', 'lid'), async (req, res) => {
   const { name, title, linkedin, start_date, end_date, is_current, team_size_estimate } = req.body
   if (is_current) {
     await supabase.from('marketing_leaders').update({ is_current: false }).eq('brand_id', req.params.id)
@@ -174,7 +177,7 @@ router.put('/:id/leaders/:lid', async (req, res) => {
 })
 
 // DELETE /api/brands/:id/leaders/:lid
-router.delete('/:id/leaders/:lid', async (req, res) => {
+router.delete('/:id/leaders/:lid', requireValidIds('id', 'lid'), async (req, res) => {
   const { error } = await supabase.from('marketing_leaders').delete().eq('id', req.params.lid)
   if (error) return dbError(res, error, 'brands')
   res.json({ success: true })

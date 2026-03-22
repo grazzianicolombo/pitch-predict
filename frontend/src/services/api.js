@@ -2,27 +2,17 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/api',
-  headers: { 'Content-Type': 'application/json' }
-})
-
-// ─── Request interceptor: attach token ───────────────────────────────────────
-api.interceptors.request.use(config => {
-  try {
-    const stored = localStorage.getItem('pp_auth')
-    if (stored) {
-      const { access_token } = JSON.parse(stored)
-      if (access_token) config.headers['Authorization'] = `Bearer ${access_token}`
-    }
-  } catch {}
-  return config
+  headers: { 'Content-Type': 'application/json' },
+  // Envia cookies httpOnly automaticamente em todas as requisições (CORS com credenciais)
+  withCredentials: true,
 })
 
 // ─── Response interceptor: auto-refresh on 401 ───────────────────────────────
 let _refreshing = false
 let _queue = []
 
-function processQueue(error, token = null) {
-  _queue.forEach(({ resolve, reject }) => error ? reject(error) : resolve(token))
+function processQueue(error) {
+  _queue.forEach(({ resolve, reject }) => error ? reject(error) : resolve())
   _queue = []
 }
 
@@ -30,43 +20,37 @@ api.interceptors.response.use(
   res => res,
   async error => {
     const original = error.config
-    if (error.response?.status !== 401 || original._retry) return Promise.reject(error)
+    // Não tenta refresh para o próprio endpoint de refresh ou login (evita loop)
+    if (
+      error.response?.status !== 401 ||
+      original._retry ||
+      original.url?.includes('/auth/refresh') ||
+      original.url?.includes('/auth/login')
+    ) {
+      return Promise.reject(error)
+    }
 
     if (_refreshing) {
       return new Promise((resolve, reject) => {
         _queue.push({ resolve, reject })
-      }).then(token => {
-        original.headers['Authorization'] = `Bearer ${token}`
-        return api(original)
-      })
+      }).then(() => api(original)).catch(err => Promise.reject(err))
     }
 
     original._retry = true
     _refreshing = true
 
     try {
-      const stored = localStorage.getItem('pp_auth')
-      if (!stored) throw new Error('no session')
-      const { refresh_token } = JSON.parse(stored)
-      if (!refresh_token) throw new Error('no refresh token')
-
-      // Call backend refresh endpoint
-      const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
-      const { data } = await axios.post(`${baseURL}/auth/refresh`, { refresh_token })
-
-      const newToken  = data.access_token
-      const newRefresh = data.refresh_token
-
-      // Update stored session
-      localStorage.setItem('pp_auth', JSON.stringify(data))
-
-      api.defaults.headers['Authorization'] = `Bearer ${newToken}`
-      processQueue(null, newToken)
-      original.headers['Authorization'] = `Bearer ${newToken}`
+      // O cookie pp_refresh_token é enviado automaticamente (withCredentials)
+      await axios.post(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/auth/refresh`,
+        {},
+        { withCredentials: true }
+      )
+      processQueue(null)
       return api(original)
     } catch (err) {
-      processQueue(err, null)
-      localStorage.removeItem('pp_auth')
+      processQueue(err)
+      // Limpa qualquer estado residual e redireciona para login
       window.location.href = '/login'
       return Promise.reject(err)
     } finally {
