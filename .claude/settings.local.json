@@ -119,7 +119,8 @@
       "Bash(curl -sv http://localhost:3001/api/predictions/dashboard)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); r=d[''''items''''][0]; print\\(r.get\\(''''months_to_pitch''''\\), r.get\\(''''probability''''\\), r[''''signals''''][0]\\)\")",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); r=d[''''items''''][0]; print\\(''''months_to_pitch:'''', r.get\\(''''months_to_pitch''''\\)\\); print\\(''''signal type:'''', type\\(r[''''signals''''][0]\\).__name__\\); print\\(''''signal:'''', r[''''signals''''][0]\\)\")",
-      "Bash(jq -e '.hooks.Stop[] | .hooks[] | select\\(.type == \"\"command\"\"\\) | .command' /Users/tennet/Claude/pitch-predict/.claude/settings.json)"
+      "Bash(jq -e '.hooks.Stop[] | .hooks[] | select\\(.type == \"\"command\"\"\\) | .command' /Users/tennet/Claude/pitch-predict/.claude/settings.json)",
+      "Bash(curl -s http://localhost:3001/api/agent/active-jobs)"
     ]
   },
   "enableAllProjectMcpServers": true,
