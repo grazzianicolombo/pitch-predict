@@ -5,8 +5,9 @@
  * Usa node-cron para disparar cada agente no horário correto.
  *
  * Schedules:
+ *  Agente 1 — Recrawl Propmark           → a cada 15min (5 concurrent, rate 300ms)
  *  Agente 3 — Busca Mídia de Negócios    → a cada 4h
- *  Agente 2 — Extração de Artigos        → a cada 2h
+ *  Agente 2 — Extração de Artigos        → a cada 10min (25 concurrent MiniMax)
  *  Agente 2 — Extração de Edições        → a cada 6h
  *  Agente 4 — Enriquecimento Executivos  → uma vez por dia (3h)
  *  Agente 6 — Captura de Sinais          → a cada 4h
@@ -17,6 +18,7 @@ const supabase = require('./lib/supabase')
 
 // Flag para evitar execuções sobrepostas por agente
 const running = {
+  recrawl:     false,
   media:       false,
   extract:     false,
   editions:    false,
@@ -27,6 +29,70 @@ const running = {
 function log(tag, msg) {
   console.log(`[scheduler:${tag}] ${new Date().toISOString().slice(0,19)} ${msg}`)
 }
+
+// ─── Agente 1: Recrawl Propmark (a cada 15min, 5 concurrent, 300ms/req) ──────
+cron.schedule('*/15 * * * *', async () => {
+  if (running.recrawl) { log('recrawl', 'Já em execução, pulando'); return }
+  running.recrawl = true
+  log('recrawl', 'Iniciando recrawl Propmark sem conteúdo')
+  try {
+    const { scrapeArticlePage } = require('./crawlers/propmark')
+
+    // Busca artigos sem conteúdo (exceto crawl_failed já descartados)
+    const { data: articles } = await supabase
+      .from('articles')
+      .select('id, url')
+      .or('content.is.null,content.eq.')
+      .not('extraction_status', 'eq', 'crawl_failed')
+      .eq('source_name', 'propmark')
+      .limit(500)
+
+    if (!articles?.length) {
+      log('recrawl', 'Nenhum artigo pendente')
+      return
+    }
+
+    log('recrawl', `${articles.length} artigos para recrawl`)
+    const CONCURRENCY = 5
+    const RATE_MS     = 300
+    let ok = 0, errors = 0
+
+    // Processa em chunks paralelos com rate limit por chunk
+    for (let i = 0; i < articles.length; i += CONCURRENCY) {
+      const chunk = articles.slice(i, i + CONCURRENCY)
+      await Promise.allSettled(chunk.map(async art => {
+        try {
+          const scraped = await scrapeArticlePage(art.url)
+          if (scraped.content?.length > 50) {
+            await supabase.from('articles').update({
+              content: scraped.content, excerpt: scraped.excerpt || null,
+              author: scraped.author || null, published_at: scraped.published_at || null,
+              tags: scraped.tags || [], extraction_status: 'pending', extracted_at: null,
+            }).eq('id', art.id)
+            ok++
+          } else {
+            await supabase.from('articles').update({
+              extraction_status: 'crawl_failed', content: '',
+            }).eq('id', art.id)
+            errors++
+          }
+        } catch (e) {
+          await supabase.from('articles').update({
+            extraction_status: 'crawl_failed', content: '',
+          }).eq('id', art.id)
+          errors++
+        }
+      }))
+      await new Promise(r => setTimeout(r, RATE_MS))
+    }
+
+    log('recrawl', `Concluído: ${ok} ok, ${errors} crawl_failed`)
+  } catch (e) {
+    log('recrawl', `Erro: ${e.message}`)
+  } finally {
+    running.recrawl = false
+  }
+})
 
 // ─── Agente 3: Busca em Mídia de Negócios (a cada 4h) ───────────────────────
 cron.schedule('0 */4 * * *', async () => {
