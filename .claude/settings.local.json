@@ -157,7 +157,8 @@
       "Bash(grep -h \"from\\(''''.*''''\\)\" /Users/tennet/Claude/pitch-predict/backend/src/routes/*.js)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(gh run:*)"
+      "Bash(gh run:*)",
+      "Bash(grep -r VITE_API /Users/tennet/Claude/pitch-predict/frontend/.env*)"
     ]
   },
   "enableAllProjectMcpServers": true,
