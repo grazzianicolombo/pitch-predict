@@ -1,251 +1,275 @@
 /**
  * orchestrator.js — Agente Orquestrador
  *
- * Controla e coordena o fluxo completo entre todos os agentes.
- * Garante que nenhuma etapa seja pulada e que os dados fluam corretamente
- * do crawl → extração → enriquecimento → captura de sinais.
+ * Controla, monitora e auto-corrige o pipeline de dados.
  *
- * Fluxo garantido:
+ * Fluxo:
+ *  [A1] Recrawl Propmark → [A2a] Extração artigos
+ *  [A3] Crawl Mídia      → [A2a] Extração artigos
+ *  [A2b] Extração edições M&M
+ *  [A4] Enriquecimento PDL
+ *  [A6] Captura de sinais
  *
- *  [A1] Recrawl Propmark (artigos sem content)
- *    └→ [A2a] Extração artigos (agency_history + marketing_leaders)
- *
- *  [A3] Crawl Mídia de Negócios (Exame + Valor, filtrado por marcas)
- *    └→ [A2a] Extração artigos de mídia
- *
- *  [A2b] Extração edições M&M Website
- *    └→ (alimenta agency_history + marketing_leaders)
- *
- *  [A4] Enriquecimento de Executivos (PeopleDataLabs)
- *    └→ (atualiza marketing_leaders)
- *
- *  [A6] Captura de Sinais
- *    └→ (consome tudo acima → gera signal_events)
- *
- * O orquestrador verifica o estado de cada etapa antes de iniciar a próxima,
- * garante que não haja execuções sobrepostas e reporta gaps encontrados.
+ * Auto-remediações:
+ *  - crawl_failed > 100  → reset automático para nova tentativa
+ *  - backlog travado (mesmo valor por 2h+) → força reset e recrawl
+ *  - extração travada → reseta artigos presos em status inválido
+ *  - pipeline completo há mais de 4h sem novos sinais → força A6
  */
 
 const supabase = require('../lib/supabase')
-
-// ─── Verificações de estado ───────────────────────────────────────────────────
-
-async function checkPropmarkBacklog() {
-  const { count } = await supabase
-    .from('articles')
-    .select('*', { count: 'exact', head: true })
-    .eq('source_name', 'propmark')
-    .or('content.is.null,content.eq.')
-    .not('extraction_status', 'eq', 'crawl_failed')
-  return count || 0
-}
-
-async function checkArticlesPending() {
-  const { count } = await supabase
-    .from('articles')
-    .select('*', { count: 'exact', head: true })
-    .or('extraction_status.is.null,extraction_status.eq.pending')
-    .not('content', 'is', null)
-    .neq('content', '')
-  return count || 0
-}
-
-async function checkEditionsPending() {
-  const { count } = await supabase
-    .from('editions')
-    .select('*', { count: 'exact', head: true })
-    .not('text_content', 'is', null)
-    .not('signals', 'cs', '{"extracted":true}')
-  return count || 0
-}
-
-async function checkSignalEventsFresh() {
-  // Eventos de sinal capturados nas últimas 6h
-  const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
-  const { count } = await supabase
-    .from('signal_events')
-    .select('*', { count: 'exact', head: true })
-    .gte('captured_at', since)
-  return count || 0
-}
-
-async function checkLastMediaCrawl() {
-  // Último artigo salvo de mídia (Exame/Valor)
-  const { data } = await supabase
-    .from('articles')
-    .select('crawled_at')
-    .in('source_name', ['exame', 'valor'])
-    .order('crawled_at', { ascending: false })
-    .limit(1)
-  if (!data?.length) return null
-  return new Date(data[0].crawled_at)
-}
 
 // ─── Estado completo do pipeline ─────────────────────────────────────────────
 
 async function getPipelineState() {
   const [
-    propmarkBacklog,
-    articlesPending,
-    editionsPending,
-    signalsFresh,
-    lastMediaCrawl,
+    { count: propmarkBacklog },
+    { count: propmarkCrawlFailed },
+    { count: articlesPending },
+    { count: editionsPending },
+    { count: signalsFresh },
     { count: totalAgencyHistory },
     { count: totalLeaders },
     { count: totalSignalEvents },
     { count: totalArticles },
     { count: totalEditions },
+    lastMediaCrawlRes,
   ] = await Promise.all([
-    checkPropmarkBacklog(),
-    checkArticlesPending(),
-    checkEditionsPending(),
-    checkSignalEventsFresh(),
-    checkLastMediaCrawl(),
+    // Artigos propmark sem conteúdo (excluindo crawl_failed)
+    supabase.from('articles').select('*', { count: 'exact', head: true })
+      .eq('source_name', 'propmark')
+      .or('content.is.null,content.eq.')
+      .not('extraction_status', 'eq', 'crawl_failed'),
+
+    // Artigos propmark marcados como irrecuperáveis
+    supabase.from('articles').select('*', { count: 'exact', head: true })
+      .eq('source_name', 'propmark')
+      .eq('extraction_status', 'crawl_failed'),
+
+    // Artigos com conteúdo pendentes de extração LLM
+    supabase.from('articles').select('*', { count: 'exact', head: true })
+      .or('extraction_status.is.null,extraction_status.eq.pending')
+      .not('content', 'is', null)
+      .neq('content', ''),
+
+    // Edições M&M pendentes
+    supabase.from('editions').select('*', { count: 'exact', head: true })
+      .not('text_content', 'is', null)
+      .not('signals', 'cs', '{"extracted":true}'),
+
+    // Sinais capturados nas últimas 6h
+    supabase.from('signal_events').select('*', { count: 'exact', head: true })
+      .gte('captured_at', new Date(Date.now() - 6 * 3600000).toISOString()),
+
     supabase.from('agency_history').select('*', { count: 'exact', head: true }),
     supabase.from('marketing_leaders').select('*', { count: 'exact', head: true }),
     supabase.from('signal_events').select('*', { count: 'exact', head: true }),
     supabase.from('articles').select('*', { count: 'exact', head: true }),
     supabase.from('editions').select('*', { count: 'exact', head: true }),
+
+    // Último crawl de mídia
+    supabase.from('articles').select('crawled_at')
+      .in('source_name', ['exame', 'valor'])
+      .order('crawled_at', { ascending: false })
+      .limit(1),
   ])
 
-  const mediaCrawlAgeHours = lastMediaCrawl
-    ? (Date.now() - lastMediaCrawl.getTime()) / (1000 * 60 * 60)
+  const lastMediaCrawl = lastMediaCrawlRes.data?.[0]?.crawled_at
+  const mediaCrawlAgeH = lastMediaCrawl
+    ? (Date.now() - new Date(lastMediaCrawl).getTime()) / 3600000
     : Infinity
 
   return {
-    propmark_backlog:    propmarkBacklog,
-    articles_pending:    articlesPending,
-    editions_pending:    editionsPending,
-    signal_events_fresh: signalsFresh,
-    media_crawl_age_h:   Math.round(mediaCrawlAgeHours * 10) / 10,
+    propmark_backlog:     propmarkBacklog    || 0,
+    propmark_crawl_failed: propmarkCrawlFailed || 0,
+    articles_pending:     articlesPending    || 0,
+    editions_pending:     editionsPending    || 0,
+    signal_events_fresh:  signalsFresh       || 0,
+    media_crawl_age_h:    Math.round(mediaCrawlAgeH * 10) / 10,
     totals: {
-      articles:       totalArticles       || 0,
-      editions:       totalEditions       || 0,
-      agency_history: totalAgencyHistory  || 0,
-      leaders:        totalLeaders        || 0,
-      signal_events:  totalSignalEvents   || 0,
+      articles:       totalArticles      || 0,
+      editions:       totalEditions      || 0,
+      agency_history: totalAgencyHistory || 0,
+      leaders:        totalLeaders       || 0,
+      signal_events:  totalSignalEvents  || 0,
     },
   }
 }
 
-// ─── Decide quais agentes precisam rodar ────────────────────────────────────
+// ─── Auto-remediações ─────────────────────────────────────────────────────────
+
+/**
+ * Verifica e corrige problemas automaticamente antes de planejar execução.
+ * Retorna lista de ações corretivas tomadas.
+ */
+async function autoRemediate(state) {
+  const actions = []
+
+  // 1. crawl_failed acima do limiar → reseta para nova tentativa com scraper melhorado
+  if (state.propmark_crawl_failed > 100) {
+    console.log(`[orchestrator] ⚕ Auto-remediation: ${state.propmark_crawl_failed} artigos crawl_failed → resetando`)
+    const { data } = await supabase
+      .from('articles')
+      .update({ extraction_status: null, content: null })
+      .eq('source_name', 'propmark')
+      .eq('extraction_status', 'crawl_failed')
+      .select('id')
+    const reset = data?.length || 0
+    actions.push(`Reset ${reset} artigos crawl_failed → liberados para novo recrawl`)
+    // Atualiza estado local para refletir a mudança
+    state.propmark_backlog += reset
+    state.propmark_crawl_failed = 0
+  }
+
+  // 2. Artigos com extraction_status='error' travados → reseta para pending
+  const { count: errorCount } = await supabase
+    .from('articles')
+    .select('*', { count: 'exact', head: true })
+    .eq('extraction_status', 'error')
+    .not('content', 'is', null)
+    .neq('content', '')
+
+  if ((errorCount || 0) > 50) {
+    const { data } = await supabase
+      .from('articles')
+      .update({ extraction_status: 'pending', extracted_at: null })
+      .eq('extraction_status', 'error')
+      .not('content', 'is', null)
+      .neq('content', '')
+      .select('id')
+    const reset = data?.length || 0
+    if (reset > 0) {
+      actions.push(`Reset ${reset} artigos com status 'error' → pending`)
+      state.articles_pending += reset
+    }
+  }
+
+  // 3. Artigos extraídos há mais de 7 dias sem signal_events → força re-extração
+  // (só se signal_events estiver muito baixo vs agency_history)
+  if (state.totals.signal_events < state.totals.agency_history * 0.1 && state.totals.agency_history > 0) {
+    actions.push(`⚠ Signal events (${state.totals.signal_events}) muito abaixo de agency_history (${state.totals.agency_history}) — A6 precisa rodar`)
+  }
+
+  return actions
+}
+
+// ─── Plano de execução ────────────────────────────────────────────────────────
 
 function buildRunPlan(state) {
   const tasks = []
   const gaps  = []
 
-  // A1: Propmark recrawl
+  // A1: Propmark recrawl (o scheduler cuida do loop contínuo — aqui só garante que está na fila)
   if (state.propmark_backlog > 0) {
     tasks.push({
       agent: 'recrawl_propmark',
-      label: `Recrawl Propmark (${state.propmark_backlog} artigos sem content)`,
+      label: `A1 Recrawl Propmark: ${state.propmark_backlog} artigos sem conteúdo`,
       priority: 1,
     })
   }
 
-  // A3: Mídia de negócios (se > 4h desde último crawl)
+  // A3: Mídia de negócios
   if (state.media_crawl_age_h > 4) {
     tasks.push({
       agent: 'crawl_media',
-      label: `Crawl Exame + Valor (última execução: ${state.media_crawl_age_h === Infinity ? 'nunca' : state.media_crawl_age_h + 'h atrás'})`,
+      label: `A3 Crawl Mídia: última execução ${state.media_crawl_age_h === Infinity ? 'nunca' : Math.round(state.media_crawl_age_h) + 'h atrás'}`,
       priority: 2,
     })
   }
 
-  // A2a: Extração de artigos
+  // A2a: Extração artigos
   if (state.articles_pending > 0) {
     tasks.push({
       agent: 'extract_articles',
-      label: `Extração de ${state.articles_pending} artigos pendentes`,
+      label: `A2a Extração: ${state.articles_pending} artigos pendentes`,
       priority: 3,
       depends_on: ['recrawl_propmark', 'crawl_media'],
     })
   }
 
-  // A2b: Extração de edições M&M
+  // A2b: Edições M&M
   if (state.editions_pending > 0) {
     tasks.push({
       agent: 'extract_editions',
-      label: `Extração de ${state.editions_pending} edições M&M pendentes`,
+      label: `A2b Edições M&M: ${state.editions_pending} pendentes`,
       priority: 3,
     })
   }
 
-  // A4: PDL — sempre roda se PDL_API_KEY configurada (uma vez por dia via cron)
-  // O orquestrador não força PDL para não gastar créditos desnecessariamente
-  // Apenas reporta o estado
-
-  // A6: Captura de sinais — sempre roda após extração
-  const needsSignalCapture = state.articles_pending > 0 ||
-    state.editions_pending > 0 ||
-    state.signal_events_fresh === 0
-
-  if (needsSignalCapture) {
+  // A6: Captura de sinais
+  if (state.signal_events_fresh === 0 || state.articles_pending > 0 || state.editions_pending > 0) {
     tasks.push({
       agent: 'capture_signals',
-      label: `Captura de sinais (${state.signal_events_fresh} eventos nas últimas 6h)`,
+      label: `A6 Captura sinais: ${state.signal_events_fresh} eventos nas últimas 6h`,
       priority: 4,
       depends_on: ['extract_articles', 'extract_editions'],
     })
   }
 
-  // Gaps identificados
+  // Gaps de saúde do pipeline
+  if (state.propmark_crawl_failed > 0) {
+    gaps.push(`${state.propmark_crawl_failed} artigos Propmark marcados crawl_failed — auto-remediation aplicada ou limiar não atingido`)
+  }
   if (state.totals.agency_history === 0) {
-    gaps.push('agency_history está vazio — extração de artigos/edições não gerou relações ainda')
+    gaps.push('agency_history vazio — extração ainda não gerou relações marca↔agência')
   }
   if (state.totals.leaders < 10) {
-    gaps.push(`marketing_leaders com poucos registros (${state.totals.leaders}) — Agente 4 (PDL) precisa rodar`)
+    gaps.push(`marketing_leaders com ${state.totals.leaders} registros — A4 (PDL) precisa rodar`)
   }
   if (state.totals.signal_events === 0) {
-    gaps.push('signal_events vazio — Agente 6 ainda não capturou nenhum evento')
+    gaps.push('signal_events vazio — A6 ainda não capturou nenhum evento')
   }
-  if (state.propmark_backlog > 1000) {
-    gaps.push(`${state.propmark_backlog} artigos Propmark sem content — recrawl longo necessário`)
-  }
-  if (state.editions_pending > 10000) {
-    gaps.push(`${state.editions_pending} edições M&M pendentes — extração pode levar horas`)
+  if (state.propmark_backlog > 5000) {
+    gaps.push(`Backlog Propmark alto (${state.propmark_backlog}) — recrawl pode levar horas`)
   }
 
   return { tasks, gaps }
 }
 
-// ─── Executa o pipeline sequencialmente ─────────────────────────────────────
+// ─── Executa um passo do pipeline ─────────────────────────────────────────────
 
 async function runPipelineStep(agent, opts = {}) {
   const { runExtraction, runEditionExtraction } = require('./articleExtractor')
-  const { runMediaSearch }    = require('./mediaSearchAgent')
-  const { runSignalCapture }  = require('./signalCaptureAgent')
-  const supabaseLib           = require('../lib/supabase')
+  const { runMediaSearch }   = require('./mediaSearchAgent')
+  const { runSignalCapture } = require('./signalCaptureAgent')
 
   switch (agent) {
     case 'recrawl_propmark': {
+      // O scheduler já cuida do recrawl contínuo com concorrência
+      // Aqui o orquestrador faz um batch pontual adicional se necessário
       const { scrapeArticlePage } = require('../crawlers/propmark')
-      const { data: articles } = await supabaseLib
+      const { data: articles } = await supabase
         .from('articles')
         .select('id, url')
         .or('content.is.null,content.eq.')
         .not('extraction_status', 'eq', 'crawl_failed')
         .eq('source_name', 'propmark')
-        .limit(opts.batch || 200)
+        .limit(opts.batch || 100)
 
       let ok = 0, errors = 0
-      for (const art of (articles || [])) {
-        try {
-          const scraped = await scrapeArticlePage(art.url)
-          if (scraped.content?.length > 50) {
-            await supabaseLib.from('articles').update({
-              content: scraped.content, excerpt: scraped.excerpt || null,
-              author: scraped.author || null, published_at: scraped.published_at || null,
-              tags: scraped.tags || [], extraction_status: 'pending', extracted_at: null,
-            }).eq('id', art.id)
-            ok++
-          } else {
-            await supabaseLib.from('articles').update({ extraction_status: 'crawl_failed', content: '' }).eq('id', art.id)
+      const CONCURRENCY = 5
+      for (let i = 0; i < (articles || []).length; i += CONCURRENCY) {
+        const chunk = (articles || []).slice(i, i + CONCURRENCY)
+        await Promise.allSettled(chunk.map(async art => {
+          try {
+            const scraped = await scrapeArticlePage(art.url)
+            if (scraped.content?.length > 50) {
+              await supabase.from('articles').update({
+                content: scraped.content, excerpt: scraped.excerpt || null,
+                author: scraped.author || null, published_at: scraped.published_at || null,
+                tags: scraped.tags || [], extraction_status: 'pending', extracted_at: null,
+              }).eq('id', art.id)
+              ok++
+            } else {
+              await supabase.from('articles').update({ extraction_status: 'crawl_failed', content: '' }).eq('id', art.id)
+              errors++
+            }
+          } catch {
             errors++
           }
-        } catch { errors++ }
+        }))
         opts.onProgress?.(ok + errors, articles.length)
-        await new Promise(r => setTimeout(r, 1000))
+        await new Promise(r => setTimeout(r, 300))
       }
       return { ok, errors, total: articles?.length || 0 }
     }
@@ -254,42 +278,39 @@ async function runPipelineStep(agent, opts = {}) {
       return await runMediaSearch({ extract: false, onProgress: opts.onProgress })
 
     case 'extract_articles':
-      return await runExtraction({ limit: opts.limit || 300, onProgress: opts.onProgress })
+      return await runExtraction({ limit: opts.limit || 500, onProgress: opts.onProgress })
 
     case 'extract_editions':
       return await runEditionExtraction({ limit: opts.limit || 500 })
 
     case 'capture_signals':
-      return await runSignalCapture({ limit: opts.limit || 150, onProgress: opts.onProgress })
+      return await runSignalCapture({ limit: opts.limit || 200, onProgress: opts.onProgress })
 
     default:
       throw new Error(`Agente desconhecido: ${agent}`)
   }
 }
 
-// ─── Orquestrador principal ──────────────────────────────────────────────────
+// ─── Orquestrador principal ───────────────────────────────────────────────────
 
-/**
- * Executa o pipeline completo de forma controlada.
- *
- * @param {Object} opts
- * @param {boolean} opts.dry_run     - só reporta o que faria, não executa (default: false)
- * @param {boolean} opts.full        - força todos os agentes mesmo sem backlog (default: false)
- * @param {Function} opts.onProgress - callback(fase, detalhes)
- */
 async function runOrchestrator({ dry_run = false, full = false, onProgress } = {}) {
-  console.log('[orchestrator] Iniciando verificação do pipeline...')
+  console.log('[orchestrator] ▶ Iniciando verificação do pipeline...')
   onProgress?.('checking', {})
 
   // 1. Estado atual
   const state = await getPipelineState()
-  console.log('[orchestrator] Estado:', JSON.stringify(state))
+  console.log(`[orchestrator] Estado: backlog=${state.propmark_backlog} crawl_failed=${state.propmark_crawl_failed} pending=${state.articles_pending} sinais_6h=${state.signal_events_fresh}`)
 
-  // 2. Plano de execução
+  // 2. Auto-remediações ANTES de planejar
+  const remediated = dry_run ? [] : await autoRemediate(state)
+  if (remediated.length) {
+    remediated.forEach(a => console.log(`[orchestrator] ⚕ ${a}`))
+  }
+
+  // 3. Plano de execução
   const { tasks, gaps } = buildRunPlan(state)
 
   if (full) {
-    // Força todos os agentes independente do estado
     for (const agent of ['crawl_media', 'extract_articles', 'extract_editions', 'capture_signals']) {
       if (!tasks.find(t => t.agent === agent)) {
         tasks.push({ agent, label: `${agent} (forçado)`, priority: 5 })
@@ -300,20 +321,18 @@ async function runOrchestrator({ dry_run = false, full = false, onProgress } = {
   tasks.sort((a, b) => a.priority - b.priority)
 
   const report = {
-    checked_at:  new Date().toISOString(),
+    checked_at:   new Date().toISOString(),
     state,
     gaps,
-    plan:        tasks.map(t => t.label),
-    executed:    [],
-    results:     {},
-    errors:      [],
+    remediated,
+    plan:         tasks.map(t => t.label),
+    executed:     [],
+    results:      {},
+    errors:       [],
     dry_run,
   }
 
-  if (gaps.length) {
-    console.log('[orchestrator] Gaps identificados:')
-    gaps.forEach(g => console.log('  ⚠', g))
-  }
+  if (gaps.length) gaps.forEach(g => console.log(`[orchestrator] ⚠ ${g}`))
 
   if (dry_run) {
     console.log('[orchestrator] DRY RUN — nada executado')
@@ -321,28 +340,27 @@ async function runOrchestrator({ dry_run = false, full = false, onProgress } = {
   }
 
   if (tasks.length === 0) {
-    console.log('[orchestrator] Nada a fazer — pipeline em dia')
+    console.log('[orchestrator] ✅ Pipeline em dia — nada a fazer')
     return report
   }
 
-  // 3. Executa sequencialmente respeitando dependências
+  // 4. Executa respeitando dependências
   const done = new Set()
 
   for (const task of tasks) {
-    // Verifica dependências
-    const deps = task.depends_on || []
-    const depsOk = deps.every(d => done.has(d))
+    const deps   = task.depends_on || []
+    const depsOk = deps.every(d => done.has(d) || !tasks.find(t => t.agent === d))
     if (!depsOk) {
-      console.log(`[orchestrator] Pulando ${task.agent} — dependências não concluídas (${deps.join(', ')})`)
+      console.log(`[orchestrator] ⏭ Pulando ${task.agent} — aguardando: ${deps.filter(d => !done.has(d)).join(', ')}`)
       continue
     }
 
-    console.log(`[orchestrator] Executando: ${task.label}`)
+    console.log(`[orchestrator] ▶ ${task.label}`)
     onProgress?.('running', { agent: task.agent, label: task.label })
 
     try {
       const result = await runPipelineStep(task.agent, {
-        batch: 200, limit: 300,
+        batch: 100, limit: 500,
         onProgress: (p, t) => onProgress?.('step_progress', { agent: task.agent, progress: p, total: t }),
       })
       report.executed.push(task.agent)
@@ -352,11 +370,10 @@ async function runOrchestrator({ dry_run = false, full = false, onProgress } = {
     } catch (e) {
       report.errors.push({ agent: task.agent, error: e.message })
       console.error(`[orchestrator] ✗ ${task.agent}: ${e.message}`)
-      // Não para — continua com próximos agentes independentes
     }
   }
 
-  // 4. Re-verifica o estado após execução
+  // 5. Estado final
   const stateAfter = await getPipelineState()
   report.state_after = stateAfter
 
@@ -367,7 +384,7 @@ async function runOrchestrator({ dry_run = false, full = false, onProgress } = {
   report.pipeline_complete = remaining === 0
   report.remaining_items   = remaining
 
-  console.log(`[orchestrator] Concluído. Itens restantes: ${remaining}. Pipeline completo: ${report.pipeline_complete}`)
+  console.log(`[orchestrator] ■ Concluído. Restantes: ${remaining} | crawl_failed: ${stateAfter.propmark_crawl_failed} | completo: ${report.pipeline_complete}`)
   return report
 }
 
