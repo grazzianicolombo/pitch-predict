@@ -59,6 +59,12 @@ export default function Users() {
     load()
   }
 
+  async function removeUser(user) {
+    if (!window.confirm(`Remover permanentemente "${user.name}" (${user.email})? Esta ação não pode ser desfeita.`)) return
+    await api.delete(`/auth/users/${user.id}`)
+    load()
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -158,6 +164,15 @@ export default function Users() {
                       }}
                     >
                       {u.active ? 'Desativar' : 'Ativar'}
+                    </button>
+                    <button
+                      onClick={() => removeUser(u)}
+                      style={{
+                        fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid #FECACA',
+                        background: '#FEF2F2', color: '#DC2626', cursor: 'pointer', fontWeight: 600,
+                      }}
+                    >
+                      Remover
                     </button>
                   </div>
                 </td>

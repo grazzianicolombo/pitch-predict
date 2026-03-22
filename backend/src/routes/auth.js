@@ -57,6 +57,36 @@ router.post('/login', async (req, res) => {
   })
 })
 
+// ─── Refresh token ───────────────────────────────────────────────────────────
+
+router.post('/refresh', async (req, res) => {
+  const { refresh_token } = req.body
+  if (!refresh_token) return res.status(400).json({ error: 'refresh_token obrigatório' })
+
+  const { data, error } = await supabaseAdmin.auth.refreshSession({ refresh_token })
+  if (error || !data.session) return res.status(401).json({ error: 'Sessão inválida ou expirada' })
+
+  const { data: profile } = await supabaseAdmin
+    .from('user_profiles')
+    .select('role, name, active')
+    .eq('user_id', data.user.id)
+    .single()
+
+  if (!profile?.active) return res.status(403).json({ error: 'Usuário desativado' })
+
+  res.json({
+    access_token:  data.session.access_token,
+    refresh_token: data.session.refresh_token,
+    expires_at:    data.session.expires_at,
+    user: {
+      id:    data.user.id,
+      email: data.user.email,
+      name:  profile.name,
+      role:  profile.role,
+    }
+  })
+})
+
 // ─── Logout ──────────────────────────────────────────────────────────────────
 
 router.post('/logout', requireAuth, async (req, res) => {
@@ -202,18 +232,33 @@ router.patch('/users/:id', requireAuth, requireRole('superadmin'), async (req, r
   res.json(data)
 })
 
-// ─── Desativa usuário (superadmin) ───────────────────────────────────────────
+// ─── Remove usuário permanentemente (superadmin) ─────────────────────────────
 
 router.delete('/users/:id', requireAuth, requireRole('superadmin'), async (req, res) => {
   const { id } = req.params
 
-  const { error } = await supabaseAdmin
+  // Busca o user_id do Supabase Auth a partir do profile id
+  const { data: profile, error: fetchErr } = await supabaseAdmin
     .from('user_profiles')
-    .update({ active: false })
+    .select('user_id')
+    .eq('id', id)
+    .single()
+
+  if (fetchErr || !profile) return res.status(404).json({ error: 'Usuário não encontrado' })
+
+  // Remove o perfil da tabela
+  const { error: delProfErr } = await supabaseAdmin
+    .from('user_profiles')
+    .delete()
     .eq('id', id)
 
-  if (error) return res.status(500).json({ error: error.message })
-  res.json({ ok: true, message: 'Usuário desativado' })
+  if (delProfErr) return res.status(500).json({ error: delProfErr.message })
+
+  // Remove o usuário do Supabase Auth
+  const { error: delAuthErr } = await supabaseAdmin.auth.admin.deleteUser(profile.user_id)
+  if (delAuthErr) return res.status(500).json({ error: delAuthErr.message })
+
+  res.json({ ok: true, message: 'Usuário removido' })
 })
 
 module.exports = router

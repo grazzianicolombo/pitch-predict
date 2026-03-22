@@ -7,22 +7,40 @@ export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Restaura sessão do localStorage
+  // Restaura sessão do localStorage (com refresh automático se expirado)
   useEffect(() => {
-    const stored = localStorage.getItem('pp_auth')
-    if (stored) {
-      try {
-        const auth = JSON.parse(stored)
-        // Verifica se o token não expirou
-        if (auth.expires_at && new Date(auth.expires_at * 1000) > new Date()) {
-          setUser(auth.user)
-          api.defaults.headers.common['Authorization'] = `Bearer ${auth.access_token}`
-        } else {
-          localStorage.removeItem('pp_auth')
-        }
-      } catch { localStorage.removeItem('pp_auth') }
+    async function restoreSession() {
+      const stored = localStorage.getItem('pp_auth')
+      if (stored) {
+        try {
+          const auth = JSON.parse(stored)
+          const expiresAt = auth.expires_at ? new Date(auth.expires_at * 1000) : null
+          const now = new Date()
+          const almostExpired = expiresAt && (expiresAt - now) < 5 * 60 * 1000 // < 5 min
+
+          if (!expiresAt || almostExpired) {
+            // Token expirado ou quase — tenta refresh
+            if (auth.refresh_token) {
+              try {
+                const { data } = await api.post('/auth/refresh', { refresh_token: auth.refresh_token })
+                localStorage.setItem('pp_auth', JSON.stringify(data))
+                api.defaults.headers.common['Authorization'] = `Bearer ${data.access_token}`
+                setUser(data.user)
+              } catch {
+                localStorage.removeItem('pp_auth')
+              }
+            } else {
+              localStorage.removeItem('pp_auth')
+            }
+          } else {
+            setUser(auth.user)
+            api.defaults.headers.common['Authorization'] = `Bearer ${auth.access_token}`
+          }
+        } catch { localStorage.removeItem('pp_auth') }
+      }
+      setLoading(false)
     }
-    setLoading(false)
+    restoreSession()
   }, [])
 
   async function login(email, password) {

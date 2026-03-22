@@ -142,7 +142,9 @@
       "Bash(curl -s -X POST https://backboard.railway.app/graphql/v2 -H \"Authorization: Bearer 9ca7c33d-0f92-42bd-bba5-13e52add2cc1\" -H \"Content-Type: application/json\" -d '{\"\"\"\"query\"\"\"\":\"\"\"\"{ workspace\\(workspaceId: \\\\\"\"\"\"1bcdc801-7f73-4887-a515-2c82c1f3ffa8\\\\\"\"\"\"\\) { projects { edges { node { id name services { edges { node { id name } } } } } } } }\"\"\"\"}')",
       "Bash(curl -s -X POST https://backboard.railway.app/graphql/v2 -H \"Authorization: Bearer 9ca7c33d-0f92-42bd-bba5-13e52add2cc1\" -H \"Content-Type: application/json\" -d '{\"\"\"\"query\"\"\"\":\"\"\"\"{ project\\(id: \\\\\"\"\"\"8ec83a9b-c295-4a9c-8a1c-f7b3b5611b2c\\\\\"\"\"\"\\) { environments { edges { node { id name } } } } }\"\"\"\"}')",
       "Bash(curl -s -X POST https://pitch-predict-production.up.railway.app/api/auth/login -H \"Content-Type: application/json\" -d '{\"\"\"\"email\"\"\"\":\"\"\"\"grazzi81@gmail.com\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"PitchAdmin@2026\"\"\"\"}')",
-      "Bash(curl -s -X POST https://backboard.railway.app/graphql/v2 -H \"Authorization: Bearer 9ca7c33d-0f92-42bd-bba5-13e52add2cc1\" -H \"Content-Type: application/json\" -d '{\"\"\"\"query\"\"\"\":\"\"\"\"{ variables\\(projectId: \\\\\"\"\"\"8ec83a9b-c295-4a9c-8a1c-f7b3b5611b2c\\\\\"\"\"\", environmentId: \\\\\"\"\"\"c6a9a3e1-8fee-43c2-942b-34c029cdc9de\\\\\"\"\"\", serviceId: \\\\\"\"\"\"2043a7a2-90ae-4824-9836-21531c0e37cf\\\\\"\"\"\"\\) }\"\"\"\"}')"
+      "Bash(curl -s -X POST https://backboard.railway.app/graphql/v2 -H \"Authorization: Bearer 9ca7c33d-0f92-42bd-bba5-13e52add2cc1\" -H \"Content-Type: application/json\" -d '{\"\"\"\"query\"\"\"\":\"\"\"\"{ variables\\(projectId: \\\\\"\"\"\"8ec83a9b-c295-4a9c-8a1c-f7b3b5611b2c\\\\\"\"\"\", environmentId: \\\\\"\"\"\"c6a9a3e1-8fee-43c2-942b-34c029cdc9de\\\\\"\"\"\", serviceId: \\\\\"\"\"\"2043a7a2-90ae-4824-9836-21531c0e37cf\\\\\"\"\"\"\\) }\"\"\"\"}')",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

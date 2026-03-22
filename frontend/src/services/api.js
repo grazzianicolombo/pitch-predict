@@ -5,6 +5,76 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' }
 })
 
+// ─── Request interceptor: attach token ───────────────────────────────────────
+api.interceptors.request.use(config => {
+  try {
+    const stored = localStorage.getItem('pp_auth')
+    if (stored) {
+      const { access_token } = JSON.parse(stored)
+      if (access_token) config.headers['Authorization'] = `Bearer ${access_token}`
+    }
+  } catch {}
+  return config
+})
+
+// ─── Response interceptor: auto-refresh on 401 ───────────────────────────────
+let _refreshing = false
+let _queue = []
+
+function processQueue(error, token = null) {
+  _queue.forEach(({ resolve, reject }) => error ? reject(error) : resolve(token))
+  _queue = []
+}
+
+api.interceptors.response.use(
+  res => res,
+  async error => {
+    const original = error.config
+    if (error.response?.status !== 401 || original._retry) return Promise.reject(error)
+
+    if (_refreshing) {
+      return new Promise((resolve, reject) => {
+        _queue.push({ resolve, reject })
+      }).then(token => {
+        original.headers['Authorization'] = `Bearer ${token}`
+        return api(original)
+      })
+    }
+
+    original._retry = true
+    _refreshing = true
+
+    try {
+      const stored = localStorage.getItem('pp_auth')
+      if (!stored) throw new Error('no session')
+      const { refresh_token } = JSON.parse(stored)
+      if (!refresh_token) throw new Error('no refresh token')
+
+      // Call backend refresh endpoint
+      const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
+      const { data } = await axios.post(`${baseURL}/auth/refresh`, { refresh_token })
+
+      const newToken  = data.access_token
+      const newRefresh = data.refresh_token
+
+      // Update stored session
+      localStorage.setItem('pp_auth', JSON.stringify(data))
+
+      api.defaults.headers['Authorization'] = `Bearer ${newToken}`
+      processQueue(null, newToken)
+      original.headers['Authorization'] = `Bearer ${newToken}`
+      return api(original)
+    } catch (err) {
+      processQueue(err, null)
+      localStorage.removeItem('pp_auth')
+      window.location.href = '/login'
+      return Promise.reject(err)
+    } finally {
+      _refreshing = false
+    }
+  }
+)
+
 export const brandsAPI = {
   getAll: () => api.get('/brands'),
   getById: (id) => api.get(`/brands/${id}`),
