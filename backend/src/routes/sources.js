@@ -1,3 +1,4 @@
+const { dbError } = require('../lib/routeHelpers')
 const express  = require('express')
 const router   = express.Router()
 const supabase = require('../lib/supabase')
@@ -23,7 +24,7 @@ router.get('/jobs', async (req, res) => {
     .from('source_jobs')
     .select('*')
     .order('source_name')
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'sources')
   res.json(data)
 })
 
@@ -50,7 +51,7 @@ router.put('/jobs/:sourceId', async (req, res) => {
     .select()
     .single()
 
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'sources')
   res.json(data)
 })
 
@@ -175,7 +176,7 @@ router.get('/jobs/:sourceId/logs', async (req, res) => {
     .eq('source_id', req.params.sourceId)
     .order('ran_at', { ascending: false })
     .limit(20)
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'sources')
   res.json(data)
 })
 
@@ -354,7 +355,7 @@ router.put('/domains/:id', async (req, res) => {
     { onConflict: 'id' }
   )
 
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'sources')
   res.json({ ok: true, id: domain.id, active })
 })
 
@@ -377,14 +378,14 @@ router.delete('/domains/:id', async (req, res) => {
     { onConflict: 'id' }
   )
 
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'sources')
   res.json({ ok: true, id: domain.id, removed: true })
 })
 
 // ─── Rotas legacy (mantidas) ────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   const { data, error } = await supabase.from('sources').select('*').order('name')
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'sources')
   res.json(data)
 })
 

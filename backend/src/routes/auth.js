@@ -174,7 +174,13 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
     return res.status(400).json({ error: 'role inválido' })
   }
 
-  const FRONTEND = process.env.FRONTEND_URL || 'https://pitch-predict.vercel.app'
+  const FRONTEND = process.env.FRONTEND_URL
+  if (!FRONTEND) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[auth] FRONTEND_URL não configurada em produção — links de convite podem estar incorretos')
+    }
+  }
+  const frontendUrl = FRONTEND || 'http://localhost:5173'
 
   // Cria o usuário no Supabase Auth
   const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
@@ -201,7 +207,7 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
   const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
     type: 'invite',
     email,
-    options: { redirectTo: `${FRONTEND}/auth/callback` },
+    options: { redirectTo: `${frontendUrl}/auth/callback` },
   })
   if (linkErr) return res.status(500).json({ error: linkErr.message })
 
@@ -275,7 +281,7 @@ router.post('/forgot-password', passwordLimiter, async (req, res) => {
   const { email } = req.body
   if (!email) return res.status(400).json({ error: 'Email obrigatório' })
 
-  const FRONTEND = process.env.FRONTEND_URL || 'https://pitch-predict.vercel.app'
+  const FRONTEND = process.env.FRONTEND_URL || 'http://localhost:5173'
 
   // Verifica se o usuário existe (sem revelar para o cliente)
   const { data: profile } = await supabaseAdmin

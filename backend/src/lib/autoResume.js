@@ -62,8 +62,8 @@ async function autoResume() {
     // Repassa params salvos (ex: since_year) para manter contexto do job original
     const savedParams = job.params || {}
     try {
-      const res = await httpPost(route, savedParams)
-      console.log(`[autoResume] ${job.type} → ${route} : ${res?.slice(0,60)}`)
+      await httpPost(route, savedParams)
+      console.log(`[autoResume] ${job.type} → ${route} : disparado`)
     } catch (e) {
       console.error(`[autoResume] Falha ao relancar ${job.type}: ${e.message}`)
     }

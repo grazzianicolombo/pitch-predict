@@ -1,17 +1,27 @@
-const express = require('express')
-const router  = express.Router()
-const supabase = require('../lib/supabase')
+const express   = require('express')
+const router    = express.Router()
+const rateLimit = require('express-rate-limit')
+const { randomUUID } = require('crypto')
+const supabase  = require('../lib/supabase')
 const { validateAgencies, saveSuggestions, applySuggestion, rejectSuggestion } = require('../agents/agencyValidator')
 const { runArchiveExtraction } = require('../agents/archiveExtractor')
 const { runExtraction, runEditionExtraction } = require('../agents/articleExtractor')
 
 // ─── Job store persistente ─────────────────────────────────────────────────
-// Jobs salvos em data/jobs.json — sobrevivem a reinicializações do servidor
 const { jobs, persist } = require('../lib/jobStore')
 
-function newJobId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-}
+// Job IDs com entropia criptográfica (UUID v4 — 122 bits)
+function newJobId() { return randomUUID() }
+
+// Rate limit para endpoints que disparam agentes de IA
+const agentLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 5,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Limite de execuções de agente atingido (5/hora).' },
+})
 
 // Mutex simples para evitar race condition na criação de jobs
 let _jobLock = false
@@ -23,8 +33,7 @@ function tryAcquireJobLock() {
 function releaseJobLock() { _jobLock = false }
 
 // ─── POST /api/agent/validate-agencies ─────────────────────────────────────
-// Inicia o agente em background e retorna job_id imediatamente
-router.post('/validate-agencies', (req, res) => {
+router.post('/validate-agencies', agentLimiter, (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('sk-ant-...')) {
     return res.status(503).json({ error: 'ANTHROPIC_API_KEY não configurada no .env do backend' })
   }
@@ -141,7 +150,7 @@ router.post('/queue/:id/reject', async (req, res) => {
 
 // ─── POST /api/agent/extract-archive ────────────────────────────────────────
 // Roda extrator de sinais do arquivo M&M (jobs assíncronos)
-router.post('/extract-archive', (req, res) => {
+router.post('/extract-archive', agentLimiter, (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('sk-ant-...')) {
     return res.status(503).json({ error: 'ANTHROPIC_API_KEY não configurada' })
   }
@@ -708,7 +717,7 @@ router.post('/reset-crawl-failed', async (req, res) => {
 
 // ─── POST /api/agent/crawl-media ─────────────────────────────────────────────
 // Agente 4: crawla Exame + Valor (e futuras fontes), filtra por marcas/agências
-router.post('/crawl-media', (req, res) => {
+router.post('/crawl-media', agentLimiter, (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('sk-ant-...')) {
     return res.status(503).json({ error: 'ANTHROPIC_API_KEY não configurada' })
   }
@@ -780,7 +789,7 @@ router.get('/crawl-media/stats', async (req, res) => {
 
 // ─── POST /api/agent/enrich-executives ───────────────────────────────────────
 // Agente 4: busca executivos no PeopleDataLabs e preenche marketing_leaders
-router.post('/enrich-executives', (req, res) => {
+router.post('/enrich-executives', agentLimiter, (req, res) => {
   if (!process.env.PDL_API_KEY) {
     return res.status(503).json({ error: 'PDL_API_KEY não configurada no .env' })
   }
@@ -849,7 +858,7 @@ router.get('/signal-audit', async (req, res) => {
 
 // ─── POST /api/agent/capture-signals ─────────────────────────────────────────
 // Agente 6: varre dados e preenche signal_events por marca
-router.post('/capture-signals', (req, res) => {
+router.post('/capture-signals', agentLimiter, (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('sk-ant-...')) {
     return res.status(503).json({ error: 'ANTHROPIC_API_KEY não configurada' })
   }
@@ -1000,7 +1009,7 @@ router.delete('/queue', async (req, res) => {
 
 // ─── POST /api/agent/validate-current-agency ─────────────────────────────────
 // Agente 7: valida agência atual de cada marca com base em notícias dos últimos 90 dias
-router.post('/validate-current-agency', (req, res) => {
+router.post('/validate-current-agency', agentLimiter, (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('sk-ant-...')) {
     return res.status(503).json({ error: 'ANTHROPIC_API_KEY não configurada' })
   }

@@ -17,9 +17,23 @@ const supabase  = require('../lib/supabase')
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 // ─── MiniMax client (OpenAI-compatible, 10x mais barato para volume) ─────────
-const MINIMAX_KEY     = process.env.MINIMAX_API_KEY
-const MINIMAX_URL     = process.env.MINIMAX_BASE_URL || 'https://api.minimaxi.chat/v1'
-const USE_MINIMAX     = !!MINIMAX_KEY   // usa MiniMax se a key estiver configurada
+const MINIMAX_KEY = process.env.MINIMAX_API_KEY
+const MINIMAX_URL = process.env.MINIMAX_BASE_URL || 'https://api.minimaxi.chat/v1'
+const USE_MINIMAX = !!MINIMAX_KEY
+
+// Proteção SSRF: só permite endpoints autorizados do MiniMax
+const MINIMAX_ALLOWED_HOSTS = ['api.minimaxi.chat', 'api.minimax.chat']
+if (USE_MINIMAX) {
+  try {
+    const parsedHost = new URL(MINIMAX_URL).hostname
+    if (!MINIMAX_ALLOWED_HOSTS.includes(parsedHost)) {
+      throw new Error(`MINIMAX_BASE_URL hostname não autorizado: ${parsedHost}`)
+    }
+  } catch (e) {
+    console.error('[articleExtractor] SSRF guard:', e.message)
+    process.exit(1)
+  }
+}
 
 function minimaxChat(prompt) {
   return new Promise((resolve, reject) => {

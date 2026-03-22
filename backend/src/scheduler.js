@@ -15,8 +15,24 @@
  *  Agente 8 — Busca Corporativa (search-first) → a cada 8h
  */
 
-const cron    = require('node-cron')
-const supabase = require('./lib/supabase')
+const cron           = require('node-cron')
+const { createClient } = require('@supabase/supabase-js')
+
+// Scheduler usa service key — bypassa RLS para acesso total aos dados do pipeline
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+)
+
+// Wrapper com timeout para evitar jobs travados indefinidamente
+async function withTimeout(fn, ms, label) {
+  return Promise.race([
+    fn(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout após ${ms / 60000}min`)), ms)
+    ),
+  ]).catch(e => { log(label, `Erro/Timeout: ${e.message}`) })
+}
 
 // Flag para evitar execuções sobrepostas por agente
 const running = {
@@ -39,6 +55,7 @@ cron.schedule('*/15 * * * *', async () => {
   if (running.recrawl) { log('recrawl', 'Já em execução, pulando'); return }
   running.recrawl = true
   log('recrawl', 'Iniciando recrawl Propmark sem conteúdo')
+  await withTimeout(async () => {
   try {
     const { scrapeArticlePage } = require('./crawlers/propmark')
 

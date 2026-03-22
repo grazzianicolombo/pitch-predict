@@ -1,11 +1,23 @@
-const express = require('express')
-const router  = express.Router()
-const supabase = require('../lib/supabase')
+const { dbError } = require('../lib/routeHelpers')
+const express   = require('express')
+const router    = express.Router()
+const rateLimit = require('express-rate-limit')
+const supabase  = require('../lib/supabase')
 const { runPrediction } = require('../agents/predictionAgent')
+
+// Rate limit específico para operações de IA: 10 por hora por usuário
+const aiLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Limite de predições atingido (10/hora). Aguarde e tente novamente.' },
+})
 
 // ─── POST /api/predictions ───────────────────────────────────────────────────
 // Gera uma nova predição de pitch
-router.post('/', async (req, res) => {
+router.post('/', aiLimiter, async (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('sk-ant-...')) {
     return res.status(503).json({ error: 'ANTHROPIC_API_KEY não configurada' })
   }
@@ -272,7 +284,7 @@ router.get('/', async (req, res) => {
     .select('id, brand, scope, context, result, created_at')
     .order('created_at', { ascending: false })
     .limit(50)
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'predictions')
   res.json(data)
 })
 

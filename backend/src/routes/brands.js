@@ -1,6 +1,7 @@
 const express = require('express')
-const router = express.Router()
+const router  = express.Router()
 const supabase = require('../lib/supabase')
+const { requireValidId, dbError } = require('../lib/routeHelpers')
 
 function safeUrl(val) {
   if (!val) return null
@@ -9,6 +10,12 @@ function safeUrl(val) {
 function safeStr(val, max = 255) {
   return val ? String(val).trim().slice(0, max) : null
 }
+function safeInt(val, min, max) {
+  if (val == null || val === '') return null
+  const n = parseInt(val, 10)
+  if (isNaN(n) || n < min || n > max) return null
+  return n
+}
 
 // GET /api/brands — listar com líder atual
 router.get('/', async (req, res) => {
@@ -16,18 +23,18 @@ router.get('/', async (req, res) => {
     .from('brands')
     .select('*, marketing_leaders(id, name, title, is_current), agency_history(id, agency, scope, year_start, year_end, status)')
     .order('name')
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'brands')
   res.json(data)
 })
 
 // GET /api/brands/:id — detalhe
-router.get('/:id', async (req, res) => {
+router.get('/:id', requireValidId, async (req, res) => {
   const { data, error } = await supabase
     .from('brands')
     .select('*, marketing_leaders(*), agency_history(*)')
     .eq('id', req.params.id)
     .single()
-  if (error) return res.status(404).json({ error: 'Marca não encontrada' })
+  if (error || !data) return res.status(404).json({ error: 'Marca não encontrada' })
   res.json(data)
 })
 
@@ -47,15 +54,15 @@ router.post('/', async (req, res) => {
       notes:               safeStr(notes, 2000),
       country_of_origin:   safeStr(country_of_origin),
       revenue_estimate:    safeStr(revenue_estimate),
-      marketing_team_size: marketing_team_size != null ? parseInt(marketing_team_size) : null,
+      marketing_team_size: safeInt(marketing_team_size, 0, 99999),
       is_listed:           !!is_listed,
-      year_in_brazil:      year_in_brazil != null ? parseInt(year_in_brazil) : null,
+      year_in_brazil:      safeInt(year_in_brazil, 1800, 2100),
       linkedin_company_url: safeUrl(linkedin_company_url),
       instagram_handle:    safeStr(instagram_handle),
     })
     .select()
     .single()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'brands')
   res.status(201).json(data)
 })
 
@@ -84,14 +91,14 @@ router.put('/:id', async (req, res) => {
     .eq('id', req.params.id)
     .select()
     .single()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'brands')
   res.json(data)
 })
 
 // DELETE /api/brands/:id
 router.delete('/:id', async (req, res) => {
   const { error } = await supabase.from('brands').delete().eq('id', req.params.id)
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'brands')
   res.json({ success: true })
 })
 
@@ -107,7 +114,7 @@ router.post('/:id/history', async (req, res) => {
       agency_group, agency_website, month_start, month_end, pitch_type })
     .select()
     .single()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'brands')
   res.status(201).json(data)
 })
 
@@ -122,14 +129,14 @@ router.put('/:id/history/:hid', async (req, res) => {
     .eq('id', req.params.hid)
     .select()
     .single()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'brands')
   res.json(data)
 })
 
 // DELETE /api/brands/:id/history/:hid
 router.delete('/:id/history/:hid', async (req, res) => {
   const { error } = await supabase.from('agency_history').delete().eq('id', req.params.hid)
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'brands')
   res.json({ success: true })
 })
 
@@ -146,7 +153,7 @@ router.post('/:id/leaders', async (req, res) => {
     .insert({ brand_id: req.params.id, name, title, linkedin, start_date, end_date, is_current, team_size_estimate })
     .select()
     .single()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'brands')
   res.status(201).json(data)
 })
 
@@ -162,14 +169,14 @@ router.put('/:id/leaders/:lid', async (req, res) => {
     .eq('id', req.params.lid)
     .select()
     .single()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'brands')
   res.json(data)
 })
 
 // DELETE /api/brands/:id/leaders/:lid
 router.delete('/:id/leaders/:lid', async (req, res) => {
   const { error } = await supabase.from('marketing_leaders').delete().eq('id', req.params.lid)
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'brands')
   res.json({ success: true })
 })
 

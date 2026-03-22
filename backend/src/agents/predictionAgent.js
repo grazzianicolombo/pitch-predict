@@ -11,6 +11,17 @@
 const Anthropic = require('@anthropic-ai/sdk')
 const supabase  = require('../lib/supabase')
 
+// Sanitiza entradas de usuário antes de interpolar em prompts Claude
+// Remove control characters e limita tamanho para prevenir prompt injection
+function sanitizeInput(val, maxLen = 200) {
+  if (!val) return ''
+  return String(val)
+    .replace(/[\x00-\x1F\x7F]/g, ' ')  // strip control chars
+    .replace(/`/g, "'")                  // evita code fence injection
+    .trim()
+    .slice(0, maxLen)
+}
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 // ─── Coleta de contexto do banco ─────────────────────────────────────────────
@@ -145,12 +156,17 @@ ${recentMovements.slice(0, 10).map(m =>
  * @param {number} opts.topN              - Quantas agências sugerir (default 3)
  */
 async function runPrediction({ brand, scope, additionalContext, topN = 3 }) {
-  console.log(`[prediction] Gerando predição para: ${brand} | escopo: ${scope || 'geral'}`)
+  // Sanitiza entradas do usuário (defesa contra prompt injection)
+  const safeBrand   = sanitizeInput(brand, 100)
+  const safeScope   = sanitizeInput(scope, 50)
+  const safeContext = sanitizeInput(additionalContext, 500)
+
+  console.log(`[prediction] Gerando predição para: ${safeBrand} | escopo: ${safeScope || 'geral'}`)
 
   // 1. Coleta contexto
   const [brandCtx, similarWinners, recentMovements] = await Promise.all([
-    getBrandContext(brand),
-    getSimilarPitchWinners({ scope, limit: 30 }),
+    getBrandContext(safeBrand),
+    getSimilarPitchWinners({ scope: safeScope, limit: 30 }),
     getRecentMarketMovements(2022),
   ])
 
@@ -163,7 +179,7 @@ async function runPrediction({ brand, scope, additionalContext, topN = 3 }) {
   const agencyProfiles = await getAgencyProfiles(candidateNames)
 
   // 2. Monta contexto
-  const contextText = buildPrompt({ brandCtx, similarWinners, recentMovements, scope, additionalContext })
+  const contextText = buildPrompt({ brandCtx, similarWinners, recentMovements, scope: safeScope, additionalContext: safeContext })
 
   // 3. Claude analisa e prediz
   const response = await client.messages.create({
@@ -197,7 +213,7 @@ Retorne APENAS JSON válido neste formato:
 }`,
     messages: [{
       role: 'user',
-      content: `Pitch aberto pela marca **${brand}**\nEscopo: ${scope || 'não especificado'}\nTop ${topN} agências mais prováveis\n\n${contextText}`,
+      content: `Pitch aberto pela marca **${safeBrand}**\nEscopo: ${safeScope || 'não especificado'}\nTop ${topN} agências mais prováveis\n\n${contextText}`,
     }]
   })
 
@@ -211,8 +227,8 @@ Retorne APENAS JSON válido neste formato:
   result.predictions = (result.predictions || []).slice(0, topN)
 
   return {
-    brand,
-    scope: scope || null,
+    brand: safeBrand,
+    scope: safeScope || null,
     brand_found: !!brandCtx,
     brand_segment: brandCtx?.brand?.segment || null,
     current_agency: brandCtx?.history?.find(h => h.status === 'active' && (!scope || h.scope?.includes(scope)))?.agency || null,

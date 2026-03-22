@@ -1,3 +1,4 @@
+const { dbError } = require('../lib/routeHelpers')
 const express = require('express')
 const router  = express.Router()
 const supabase = require('../lib/supabase')
@@ -93,7 +94,7 @@ router.get('/usage/log', async (req, res) => {
     .order('created_at', { ascending: false })
     .limit(50)
 
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'setup')
   res.json(data)
 })
 

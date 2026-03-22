@@ -1,10 +1,11 @@
+const { dbError } = require('../lib/routeHelpers')
 const express = require('express')
 const router = express.Router()
 const supabase = require('../lib/supabase')
 
 router.get('/', async (req, res) => {
   const { data, error } = await supabase.from('model_variables').select('*').order('weight', { ascending: false })
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'variables')
   res.json(data)
 })
 
@@ -17,7 +18,7 @@ router.post('/', async (req, res) => {
     .insert({ name, weight: safeWeight, type, description, active })
     .select()
     .single()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'variables')
   res.status(201).json(data)
 })
 
@@ -32,13 +33,13 @@ router.put('/:id', async (req, res) => {
     .eq('id', req.params.id)
     .select()
     .single()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'variables')
   res.json(data)
 })
 
 router.delete('/:id', async (req, res) => {
   const { error } = await supabase.from('model_variables').delete().eq('id', req.params.id)
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'variables')
   res.json({ success: true })
 })
 

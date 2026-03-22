@@ -1,3 +1,4 @@
+const { dbError } = require('../lib/routeHelpers')
 const express = require('express')
 const router = express.Router()
 const supabase = require('../lib/supabase')
@@ -8,7 +9,7 @@ router.get('/', async (req, res) => {
     .select('*')
     .order('category')
     .order('weight', { ascending: false })
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'fields')
   res.json(data)
 })
 
@@ -21,7 +22,7 @@ router.post('/', async (req, res) => {
     .insert({ name, category, signal_key, description, examples, weight: safeWeight, active })
     .select()
     .single()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'fields')
   res.status(201).json(data)
 })
 
@@ -36,7 +37,7 @@ router.put('/:id', async (req, res) => {
     .eq('id', req.params.id)
     .select()
     .single()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'fields')
   res.json(data)
 })
 
@@ -51,7 +52,7 @@ router.get('/events', async (req, res) => {
     .limit(limit)
   if (brand_id) q = q.eq('brand_id', brand_id)
   const { data, error } = await q
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'fields')
   res.json(data)
 })
 
@@ -62,13 +63,13 @@ router.post('/events', async (req, res) => {
     .insert({ brand_id, signal_key, signal_name, weight_applied, evidence_text, source_article_id, expires_at, metadata })
     .select()
     .single()
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'fields')
   res.status(201).json(data)
 })
 
 router.delete('/:id', async (req, res) => {
   const { error } = await supabase.from('collected_fields').delete().eq('id', req.params.id)
-  if (error) return res.status(500).json({ error: error.message })
+  if (error) return dbError(res, error, 'fields')
   res.json({ success: true })
 })
 
