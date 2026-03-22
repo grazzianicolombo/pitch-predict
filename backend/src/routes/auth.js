@@ -10,10 +10,10 @@
  * DELETE /api/auth/users/:id   — desativa usuário (superadmin)
  */
 
-const express  = require('express')
-const router   = express.Router()
+const express      = require('express')
+const router       = express.Router()
 const { createClient } = require('@supabase/supabase-js')
-const { Resend } = require('resend')
+const nodemailer   = require('nodemailer')
 const { requireAuth, requireRole } = require('../lib/auth')
 
 const supabaseAdmin = createClient(
@@ -21,7 +21,24 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_KEY
 )
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+const mailer = nodemailer.createTransport({
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+})
+
+async function sendEmail({ to, subject, html }) {
+  return mailer.sendMail({
+    from: `"Pitch Predict" <${process.env.SMTP_USER}>`,
+    to,
+    subject,
+    html,
+  })
+}
 
 // ─── Login ───────────────────────────────────────────────────────────────────
 
@@ -162,10 +179,9 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
   })
   if (linkErr) return res.status(500).json({ error: linkErr.message })
 
-  // Envia email via Resend API
+  // Envia email via Gmail SMTP
   const inviteUrl = linkData.properties.action_link
-  await resend.emails.send({
-    from: 'Pitch Predict <onboarding@resend.dev>',
+  await sendEmail({
     to: email,
     subject: 'Você foi convidado para o Pitch Predict',
     html: `
@@ -250,8 +266,7 @@ router.post('/forgot-password', async (req, res) => {
 
     if (!linkErr && linkData) {
       const resetUrl = linkData.properties.action_link
-      await resend.emails.send({
-        from: 'Pitch Predict <onboarding@resend.dev>',
+      await sendEmail({
         to: email,
         subject: 'Redefinir senha — Pitch Predict',
         html: `
