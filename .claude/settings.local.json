@@ -131,7 +131,10 @@
       "Bash(xargs kill:*)",
       "Bash(railway --version)",
       "Bash(railway status:*)",
-      "Bash(railway login:*)"
+      "Bash(railway login:*)",
+      "Bash(RAILWAY_TOKEN=c77426c0-b1d3-4110-b93f-6f9e359dfaa2 railway status)",
+      "Bash(RAILWAY_TOKEN=c77426c0-b1d3-4110-b93f-6f9e359dfaa2 railway whoami)",
+      "Bash(curl -s -X POST https://backboard.railway.app/graphql/v2 -H \"Authorization: Bearer c77426c0-b1d3-4110-b93f-6f9e359dfaa2\" -H \"Content-Type: application/json\" -d '{\"\"\"\"query\"\"\"\":\"\"\"\"{ me { name email } }\"\"\"\"}')"
     ]
   },
   "enableAllProjectMcpServers": true,
