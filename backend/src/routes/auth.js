@@ -179,9 +179,18 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
   })
   if (linkErr) return res.status(500).json({ error: linkErr.message })
 
-  // Envia email via Gmail SMTP
+  // Responde imediatamente — envia email em background
+  res.status(201).json({
+    id:      profile.id,
+    name:    profile.name,
+    email:   profile.email,
+    role:    profile.role,
+    invited: true,
+  })
+
+  // Envia email em background (não bloqueia a resposta)
   const inviteUrl = linkData.properties.action_link
-  await sendEmail({
+  sendEmail({
     to: email,
     subject: 'Você foi convidado para o Pitch Predict',
     html: `
@@ -205,15 +214,7 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
         </p>
       </div>
     `,
-  })
-
-  res.status(201).json({
-    id:      profile.id,
-    name:    profile.name,
-    email:   profile.email,
-    role:    profile.role,
-    invited: true,
-  })
+  }).catch(err => console.error('[email] invite error:', err.message))
 })
 
 // ─── Define senha via token do email (convite / reset) ────────────────────────
