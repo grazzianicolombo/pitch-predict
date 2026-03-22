@@ -141,12 +141,46 @@ function parseSitemapURLs(xml) {
   return urls
 }
 
-/** Scrape uma página de artigo individual */
+/** Extrai conteúdo com múltiplos seletores de fallback */
+function extractContent(html) {
+  // Estratégia 1: seletor principal atual
+  let contentHtml = between(html, '<div class="post-content', '</article>')
+  if (!contentHtml) {
+    // Estratégia 2: ghost-content (versões mais antigas do tema)
+    contentHtml = between(html, '<div class="gh-content', '</article>')
+  }
+  if (!contentHtml) {
+    // Estratégia 3: article__body (outro tema Ghost comum)
+    contentHtml = between(html, '<section class="article__body', '</section>')
+  }
+  if (!contentHtml) {
+    // Estratégia 4: qualquer div com "content" no class dentro de article
+    const articleHtml = between(html, '<article', '</article>')
+    contentHtml = between(articleHtml, '<div class="content', '</div>')
+    if (!contentHtml) contentHtml = articleHtml
+  }
+  if (!contentHtml) {
+    // Estratégia 5: og:description como último recurso (pelo menos o excerpt)
+    return { content: '', excerpt: decodeEntities(between(html, 'property="og:description" content="', '"')) }
+  }
+
+  const contentStart = contentHtml.indexOf('>')
+  const contentBody = contentStart >= 0 ? contentHtml.slice(contentStart + 1) : contentHtml
+  const content = stripTags(contentBody).replace(/\s+/g, ' ').trim()
+  const blockquote = between(contentBody, '<blockquote>', '</blockquote>')
+  const excerpt = blockquote ? stripTags(blockquote).trim() : content.slice(0, 300)
+  return { content, excerpt }
+}
+
+/** Scrape uma página de artigo individual — com múltiplos seletores de fallback */
 async function scrapeArticlePage(url) {
   const html = await fetch(url)
 
-  // Title
-  const title = decodeEntities(stripTags(between(html, '<h1 class="title">', '</h1>')))
+  // Title — múltiplos seletores
+  let title = decodeEntities(stripTags(between(html, '<h1 class="title">', '</h1>')))
+  if (!title) title = decodeEntities(stripTags(between(html, '<h1 class="article__title">', '</h1>')))
+  if (!title) title = decodeEntities(stripTags(between(html, '<h1 class="gh-article-title">', '</h1>')))
+  if (!title) title = decodeEntities(between(html, 'property="og:title" content="', '"'))
 
   // Author
   let author = ''
@@ -154,22 +188,18 @@ async function scrapeArticlePage(url) {
   if (authorBlock) {
     author = stripTags(authorBlock).replace(/^Por\s+/i, '').trim()
   }
+  if (!author) {
+    const metaAuthor = between(html, 'name="author" content="', '"')
+    if (metaAuthor) author = decodeEntities(metaAuthor)
+  }
 
   // Date (from meta tag — most reliable)
   let published_at = null
   const metaDate = between(html, 'property="article:published_time" content="', '"')
   if (metaDate) published_at = metaDate
 
-  // Content
-  const contentHtml = between(html, '<div class="post-content', '</article>')
-  // Começa após o primeiro >
-  const contentStart = contentHtml.indexOf('>')
-  const contentBody = contentStart >= 0 ? contentHtml.slice(contentStart + 1) : contentHtml
-  const content = stripTags(contentBody).replace(/\s+/g, ' ').trim()
-
-  // Excerpt (primeiro blockquote ou primeiros 300 chars)
-  const blockquote = between(contentBody, '<blockquote>', '</blockquote>')
-  const excerpt = blockquote ? stripTags(blockquote).trim() : content.slice(0, 300)
+  // Content — com fallbacks
+  const { content, excerpt } = extractContent(html)
 
   // Tags
   const tags = []

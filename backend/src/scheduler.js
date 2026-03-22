@@ -44,14 +44,14 @@ cron.schedule('0 */4 * * *', async () => {
   }
 })
 
-// ─── Agente 2: Extração de Artigos (a cada 2h) ──────────────────────────────
-cron.schedule('30 */2 * * *', async () => {
+// ─── Agente 2: Extração de Artigos (a cada 30min, batch de 1000) ─────────────
+cron.schedule('*/30 * * * *', async () => {
   if (running.extract) { log('extract', 'Já em execução, pulando'); return }
   running.extract = true
   log('extract', 'Iniciando extração de artigos pendentes')
   try {
     const { runExtraction } = require('./agents/articleExtractor')
-    const result = await runExtraction({ limit: 200 })
+    const result = await runExtraction({ limit: 1000 })
     log('extract', `Concluído: ${result.processed} processados, ${result.skipped} skipped`)
   } catch (e) {
     log('extract', `Erro: ${e.message}`)

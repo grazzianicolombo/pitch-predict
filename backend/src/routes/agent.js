@@ -668,6 +668,21 @@ router.post('/recrawl-articles-all', (req, res) => {
   res.json({ job_id: jobId, status: 'running', batch })
 })
 
+// ─── POST /api/agent/reset-crawl-failed ──────────────────────────────────────
+// Reseta artigos crawl_failed para null — permite nova tentativa com scraper melhorado
+router.post('/reset-crawl-failed', async (req, res) => {
+  const { source_name = 'propmark' } = req.body
+  const { data, error } = await supabase
+    .from('articles')
+    .update({ extraction_status: null, content: null })
+    .eq('source_name', source_name)
+    .eq('extraction_status', 'crawl_failed')
+    .select('id')
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ ok: true, reset: data?.length || 0, message: `${data?.length || 0} artigos liberados para novo recrawl` })
+})
+
 // ─── POST /api/agent/crawl-media ─────────────────────────────────────────────
 // Agente 4: crawla Exame + Valor (e futuras fontes), filtra por marcas/agências
 router.post('/crawl-media', (req, res) => {
