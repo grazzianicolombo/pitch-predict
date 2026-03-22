@@ -286,6 +286,80 @@ async function runSource(sourceId) {
   }
 }
 
+// ─── GET /api/sources/domains ────────────────────────────────────────────────
+// Retorna todos os domínios/URLs monitorados com estado ativo/inativo do banco
+router.get('/domains', async (req, res) => {
+  const { DOMAINS } = require('../lib/sourceDomains')
+
+  // Busca estado ativo/inativo salvo no banco (tabela sources)
+  const { data: dbSources } = await supabase
+    .from('sources')
+    .select('id, url, active')
+
+  // Mapa: id → active (do banco)
+  const dbMap = {}
+  for (const s of (dbSources || [])) {
+    dbMap[s.id] = s.active
+  }
+
+  // Mescla: se ID não existe no banco, default = true (ativo)
+  const domains = DOMAINS.map(d => ({
+    ...d,
+    active: d.id in dbMap ? dbMap[d.id] : true,
+  }))
+
+  res.json(domains)
+})
+
+// ─── PUT /api/sources/domains/:id ────────────────────────────────────────────
+// Ativa ou desativa um domínio (persiste na tabela sources)
+router.put('/domains/:id', async (req, res) => {
+  const { DOMAINS } = require('../lib/sourceDomains')
+  const domain = DOMAINS.find(d => d.id === req.params.id)
+  if (!domain) return res.status(404).json({ error: 'Domínio não encontrado' })
+
+  const { active } = req.body
+  if (typeof active !== 'boolean') return res.status(400).json({ error: '"active" deve ser boolean' })
+
+  // Upsert na tabela sources
+  const { error } = await supabase.from('sources').upsert(
+    {
+      id:      domain.id,
+      name:    domain.name,
+      url:     domain.url,
+      type:    domain.method,
+      active,
+    },
+    { onConflict: 'id' }
+  )
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ ok: true, id: domain.id, active })
+})
+
+// ─── DELETE /api/sources/domains/:id ─────────────────────────────────────────
+// Remove permanentemente um domínio da lista ativa (desativa no banco)
+router.delete('/domains/:id', async (req, res) => {
+  const { DOMAINS } = require('../lib/sourceDomains')
+  const domain = DOMAINS.find(d => d.id === req.params.id)
+  if (!domain) return res.status(404).json({ error: 'Domínio não encontrado' })
+
+  // Marca como inativo permanentemente
+  const { error } = await supabase.from('sources').upsert(
+    {
+      id:      domain.id,
+      name:    domain.name,
+      url:     domain.url,
+      type:    domain.method,
+      active:  false,
+    },
+    { onConflict: 'id' }
+  )
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ ok: true, id: domain.id, removed: true })
+})
+
 // ─── Rotas legacy (mantidas) ────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   const { data, error } = await supabase.from('sources').select('*').order('name')
