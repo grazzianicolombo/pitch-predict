@@ -975,4 +975,123 @@ router.delete('/queue', async (req, res) => {
   res.json({ success: true })
 })
 
+// ─── POST /api/agent/validate-current-agency ─────────────────────────────────
+// Agente 7: valida agência atual de cada marca com base em notícias dos últimos 90 dias
+router.post('/validate-current-agency', (req, res) => {
+  if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('sk-ant-...')) {
+    return res.status(503).json({ error: 'ANTHROPIC_API_KEY não configurada' })
+  }
+  if (!process.env.TAVILY_API_KEY) {
+    return res.status(503).json({ error: 'TAVILY_API_KEY não configurada' })
+  }
+
+  const existing = Object.values(jobs).find(j => j.status === 'running' && j.type === 'current_agency')
+  if (existing) {
+    return res.json({ job_id: existing.id, status: 'running', message: 'Já em execução' })
+  }
+
+  const { limit = 50 } = req.body
+  const jobId = newJobId()
+  jobs[jobId] = {
+    id: jobId, type: 'current_agency', status: 'running',
+    progress: 0, total: limit, result: null, error: null,
+    startedAt: new Date(),
+    label: `Validação agência atual (${limit} marcas)`,
+  }
+  persist()
+
+  setImmediate(async () => {
+    try {
+      const { runCurrentAgencyValidation } = require('../agents/currentAgencyAgent')
+      const result = await runCurrentAgencyValidation({
+        limit,
+        onProgress: (i, total) => {
+          jobs[jobId].progress = i
+          jobs[jobId].total    = total
+        },
+      })
+      jobs[jobId].status   = 'done'
+      jobs[jobId].result   = result
+      jobs[jobId].progress = result.brands_analyzed
+      jobs[jobId].total    = result.brands_analyzed
+    } catch (e) {
+      jobs[jobId].status = 'error'
+      jobs[jobId].error  = e.message
+      console.error('[validate-current-agency] Erro:', e.message)
+    }
+  })
+
+  res.json({ job_id: jobId, status: 'running' })
+})
+
+// ─── GET /api/agent/validate-current-agency/stats ────────────────────────────
+router.get('/validate-current-agency/stats', async (req, res) => {
+  const [{ count: total_active }, { count: pending_review }] = await Promise.all([
+    supabase.from('agency_history').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+    supabase.from('validation_queue').select('*', { count: 'exact', head: true })
+      .eq('type', 'agency_change').eq('status', 'pending'),
+  ])
+
+  // Quantidade de brands com agência ativa
+  const { data: brandsWithAgency } = await supabase
+    .from('agency_history')
+    .select('brand_id')
+    .eq('status', 'active')
+
+  const uniqueBrands = new Set((brandsWithAgency || []).map(r => r.brand_id)).size
+
+  res.json({
+    active_records: total_active     || 0,
+    brands_covered: uniqueBrands,
+    pending_review: pending_review   || 0,
+  })
+})
+
+// ─── POST /api/agent/corporate-search ────────────────────────────────────────
+// Agente 8: busca notícias de marcas/agências/executivos em fontes corporativas (search-first)
+router.post('/corporate-search', (req, res) => {
+  if (!process.env.TAVILY_API_KEY) {
+    return res.status(503).json({ error: 'TAVILY_API_KEY não configurada' })
+  }
+
+  const existing = Object.values(jobs).find(j => j.status === 'running' && j.type === 'corporate_search')
+  if (existing) {
+    return res.json({ job_id: existing.id, status: 'running', message: 'Já em execução' })
+  }
+
+  const { limitBrands = 40, limitAgencies = 20, limitLeaders = 20, extract = true } = req.body
+  const jobId = newJobId()
+  jobs[jobId] = {
+    id: jobId, type: 'corporate_search', status: 'running',
+    progress: 0, total: limitBrands + limitAgencies + limitLeaders,
+    result: null, error: null,
+    startedAt: new Date(),
+    label: `Busca corporativa (${limitBrands} marcas, ${limitAgencies} agências, ${limitLeaders} executivos)`,
+  }
+  persist()
+
+  setImmediate(async () => {
+    try {
+      const { runCorporateSearch } = require('../agents/corporateSearchAgent')
+      const result = await runCorporateSearch({
+        limitBrands, limitAgencies, limitLeaders, extract,
+        onProgress: (i, total) => {
+          jobs[jobId].progress = i
+          jobs[jobId].total    = total
+        },
+      })
+      jobs[jobId].status   = 'done'
+      jobs[jobId].result   = result
+      jobs[jobId].progress = result.entities_searched
+      jobs[jobId].total    = result.entities_searched
+    } catch (e) {
+      jobs[jobId].status = 'error'
+      jobs[jobId].error  = e.message
+      console.error('[corporate-search] Erro:', e.message)
+    }
+  })
+
+  res.json({ job_id: jobId, status: 'running' })
+})
+
 module.exports = router

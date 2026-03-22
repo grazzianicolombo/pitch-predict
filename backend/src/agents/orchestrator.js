@@ -5,7 +5,8 @@
  *
  *  [OBJ 1] FONTES ATUALIZADAS
  *    → A1:  Propmark RSS (novos artigos) + recrawl de artigos sem conteúdo
- *    → A3:  Mídia de Negócios (Exame + Valor)
+ *    → A3:  Mídia de Negócios (Exame + Valor + M&M + Adnews)
+ *    → A8:  Busca Corporativa search-first (marcas/agências/executivos)
  *    → A2b: Edições M&M Website
  *
  *  [OBJ 2] EXTRAÇÃO E RELACIONAMENTO
@@ -16,6 +17,7 @@
  *  [OBJ 3] DADOS NO MENU DE MARCAS
  *    → Verifica se brands têm agency_history e marketing_leaders associados
  *    → Detecta marcas sem dados e força re-extração direcionada
+ *    → A7: Validação de agência atual (últimos 90 dias) — corrige dados desatualizados
  *
  *  [OBJ 4] MOTOR PREDITIVO ALIMENTADO
  *    → A6: signal_events atualizados por marca
@@ -40,6 +42,8 @@ async function checkSources() {
     { count: propmarkTotal },
     lastPropmarkRSS,
     lastMedia,
+    lastMM,
+    lastCorporate,
   ] = await Promise.all([
     supabase.from('articles').select('*', { count: 'exact', head: true })
       .eq('source_name', 'propmark')
@@ -58,26 +62,38 @@ async function checkSources() {
       .order('crawled_at', { ascending: false })
       .limit(1),
 
+    // RSS geral: Exame, Valor, M&M, Adnews
     supabase.from('articles').select('crawled_at')
-      .in('source_name', ['exame', 'valor'])
+      .in('source_name', ['exame', 'valor', 'meioemensagem', 'adnews'])
+      .order('crawled_at', { ascending: false })
+      .limit(1),
+
+    // M&M especificamente
+    supabase.from('articles').select('crawled_at')
+      .eq('source_name', 'meioemensagem')
+      .order('crawled_at', { ascending: false })
+      .limit(1),
+
+    // Busca corporativa (search-first)
+    supabase.from('articles').select('crawled_at')
+      .in('source_name', ['corporate_news', 'b9', 'portaldapropaganda', 'adnews', 'brainstorm9'])
       .order('crawled_at', { ascending: false })
       .limit(1),
   ])
 
-  const propmarkAgeH = lastPropmarkRSS.data?.[0]?.crawled_at
-    ? (Date.now() - new Date(lastPropmarkRSS.data[0].crawled_at).getTime()) / 3600000
-    : Infinity
-
-  const mediaAgeH = lastMedia.data?.[0]?.crawled_at
-    ? (Date.now() - new Date(lastMedia.data[0].crawled_at).getTime()) / 3600000
-    : Infinity
+  function ageH(res) {
+    const ts = res?.data?.[0]?.crawled_at
+    return ts ? (Date.now() - new Date(ts).getTime()) / 3600000 : Infinity
+  }
 
   return {
-    propmark_backlog:      propmarkBacklog      || 0,
-    propmark_crawl_failed: propmarkCrawlFailed  || 0,
-    propmark_total:        propmarkTotal        || 0,
-    propmark_age_h:        Math.round(propmarkAgeH * 10) / 10,
-    media_age_h:           Math.round(mediaAgeH * 10) / 10,
+    propmark_backlog:      propmarkBacklog     || 0,
+    propmark_crawl_failed: propmarkCrawlFailed || 0,
+    propmark_total:        propmarkTotal       || 0,
+    propmark_age_h:        Math.round(ageH(lastPropmarkRSS) * 10) / 10,
+    media_age_h:           Math.round(ageH(lastMedia) * 10) / 10,
+    mm_age_h:              Math.round(ageH(lastMM) * 10) / 10,
+    corporate_age_h:       Math.round(ageH(lastCorporate) * 10) / 10,
   }
 }
 
@@ -127,6 +143,7 @@ async function checkBrands() {
     { count: totalBrands },
     brandsWithHistory,
     brandsWithLeaders,
+    { count: agencyValidationPending },
   ] = await Promise.all([
     supabase.from('brands').select('*', { count: 'exact', head: true }),
 
@@ -137,16 +154,21 @@ async function checkBrands() {
     supabase.from('marketing_leaders').select('brand_id')
       .not('brand_id', 'is', null)
       .then(({ data }) => new Set((data || []).map(r => r.brand_id)).size),
+
+    // Itens pendentes de revisão de mudança de agência
+    supabase.from('validation_queue').select('*', { count: 'exact', head: true })
+      .eq('type', 'agency_change').eq('status', 'pending'),
   ])
 
   const total = totalBrands || 0
   return {
-    total_brands:          total,
-    brands_with_history:   brandsWithHistory,
-    brands_with_leaders:   brandsWithLeaders,
-    brands_without_history: total - brandsWithHistory,
-    brands_without_leaders: total - brandsWithLeaders,
-    coverage_pct: total > 0 ? Math.round((brandsWithHistory / total) * 100) : 0,
+    total_brands:               total,
+    brands_with_history:        brandsWithHistory,
+    brands_with_leaders:        brandsWithLeaders,
+    brands_without_history:     total - brandsWithHistory,
+    brands_without_leaders:     total - brandsWithLeaders,
+    coverage_pct:               total > 0 ? Math.round((brandsWithHistory / total) * 100) : 0,
+    agency_validation_pending:  agencyValidationPending || 0,
   }
 }
 
@@ -291,7 +313,14 @@ function buildHealthReport(state) {
   }
   if (state.sources.media_age_h > 4) {
     tasks.push({ agent: 'crawl_media', priority: 2,
-      label: `A3 Mídia: última atualização ${state.sources.media_age_h === Infinity ? 'nunca' : Math.round(state.sources.media_age_h) + 'h atrás'}` })
+      label: `A3 Mídia RSS: última atualização ${state.sources.media_age_h === Infinity ? 'nunca' : Math.round(state.sources.media_age_h) + 'h atrás'} (Exame+Valor+M&M+Adnews)` })
+  }
+  if (state.sources.mm_age_h === Infinity) {
+    gaps.push('[OBJ1] Meio & Mensagem nunca crawlado — verificar se RSS está configurado')
+  }
+  if (state.sources.corporate_age_h > 12) {
+    tasks.push({ agent: 'corporate_search', priority: 2,
+      label: `A8 Busca Corporativa: última busca ${state.sources.corporate_age_h === Infinity ? 'nunca' : Math.round(state.sources.corporate_age_h) + 'h atrás'}` })
   }
 
   // OBJ 2 — Extração
@@ -320,6 +349,10 @@ function buildHealthReport(state) {
   }
   if (state.brands.brands_without_leaders > state.brands.total_brands * 0.5) {
     gaps.push(`[OBJ3] ${state.brands.brands_without_leaders} marcas sem executivos vinculados`)
+  }
+  // Alerta para dados de agência possivelmente desatualizados (nenhuma validação recente)
+  if (state.brands.agency_validation_pending > 10) {
+    gaps.push(`[OBJ3] ${state.brands.agency_validation_pending} itens pendentes na fila de validação de agência`)
   }
 
   // OBJ 4 — Motor preditivo
@@ -397,6 +430,11 @@ async function runPipelineStep(agent, opts = {}) {
 
     case 'capture_signals':
       return await runSignalCapture({ limit: opts.limit || 200, onProgress: opts.onProgress })
+
+    case 'corporate_search': {
+      const { runCorporateSearch } = require('./corporateSearchAgent')
+      return await runCorporateSearch({ limitBrands: 40, limitAgencies: 20, limitLeaders: 20 })
+    }
 
     default:
       throw new Error(`Agente desconhecido: ${agent}`)

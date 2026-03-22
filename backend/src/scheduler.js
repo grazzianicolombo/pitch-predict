@@ -5,12 +5,14 @@
  * Usa node-cron para disparar cada agente no horário correto.
  *
  * Schedules:
- *  Agente 1 — Recrawl Propmark           → a cada 15min (5 concurrent, rate 300ms)
- *  Agente 3 — Busca Mídia de Negócios    → a cada 4h
- *  Agente 2 — Extração de Artigos        → a cada 10min (25 concurrent MiniMax)
- *  Agente 2 — Extração de Edições        → a cada 6h
- *  Agente 4 — Enriquecimento Executivos  → uma vez por dia (3h)
- *  Agente 6 — Captura de Sinais          → a cada 4h
+ *  Agente 1 — Recrawl Propmark                → a cada 15min (5 concurrent, rate 300ms)
+ *  Agente 3 — Busca Mídia (Exame+Valor+M&M+Adnews) → a cada 4h
+ *  Agente 2 — Extração de Artigos             → a cada 10min (25 concurrent MiniMax)
+ *  Agente 2 — Extração de Edições             → a cada 6h
+ *  Agente 4 — Enriquecimento Executivos       → uma vez por dia (3h)
+ *  Agente 6 — Captura de Sinais               → a cada 4h
+ *  Agente 7 — Validação Agência Atual         → 2x por dia (8h e 20h)
+ *  Agente 8 — Busca Corporativa (search-first) → a cada 8h
  */
 
 const cron    = require('node-cron')
@@ -18,12 +20,14 @@ const supabase = require('./lib/supabase')
 
 // Flag para evitar execuções sobrepostas por agente
 const running = {
-  recrawl:     false,
-  media:       false,
-  extract:     false,
-  editions:    false,
-  executives:  false,
-  signals:     false,
+  recrawl:         false,
+  media:           false,
+  extract:         false,
+  editions:        false,
+  executives:      false,
+  signals:         false,
+  currentAgency:   false,
+  corporateSearch: false,
 }
 
 function log(tag, msg) {
@@ -95,14 +99,15 @@ cron.schedule('*/15 * * * *', async () => {
 })
 
 // ─── Agente 3: Busca em Mídia de Negócios (a cada 4h) ───────────────────────
+// Inclui: Exame, Valor Econômico, Meio & Mensagem, Adnews
 cron.schedule('0 */4 * * *', async () => {
   if (running.media) { log('media', 'Já em execução, pulando'); return }
   running.media = true
-  log('media', 'Iniciando crawl Exame + Valor')
+  log('media', 'Iniciando crawl Exame + Valor + M&M + Adnews')
   try {
     const { runMediaSearch } = require('./agents/mediaSearchAgent')
     const result = await runMediaSearch({ extract: true })
-    log('media', `Concluído: ${result.articles_saved} artigos salvos`)
+    log('media', `Concluído: ${result.articles_saved} artigos salvos (${Object.keys(result.by_source || {}).join(', ')})`)
   } catch (e) {
     log('media', `Erro: ${e.message}`)
   } finally {
@@ -173,6 +178,45 @@ cron.schedule('0 2,6,10,14,18,22 * * *', async () => {
     log('signals', `Erro: ${e.message}`)
   } finally {
     running.signals = false
+  }
+})
+
+// ─── Agente 7: Validação de Agência Atual (2x por dia: 8h e 20h) ────────────
+// Valida agência atual de cada marca com base em notícias dos últimos 90 dias.
+// Alta confiança → atualiza automaticamente. Média → vai para revisão humana.
+cron.schedule('0 8,20 * * *', async () => {
+  if (!process.env.ANTHROPIC_API_KEY) { log('current-agency', 'ANTHROPIC_API_KEY não configurada, pulando'); return }
+  if (!process.env.TAVILY_API_KEY)    { log('current-agency', 'TAVILY_API_KEY não configurada, pulando'); return }
+  if (running.currentAgency) { log('current-agency', 'Já em execução, pulando'); return }
+  running.currentAgency = true
+  log('current-agency', 'Iniciando validação de agências atuais')
+  try {
+    const { runCurrentAgencyValidation } = require('./agents/currentAgencyAgent')
+    const result = await runCurrentAgencyValidation({ limit: 50 })
+    log('current-agency', `Concluído: ${result.auto_updated} atualizados, ${result.queued_for_review} na fila, ${result.no_change} sem mudança`)
+  } catch (e) {
+    log('current-agency', `Erro: ${e.message}`)
+  } finally {
+    running.currentAgency = false
+  }
+})
+
+// ─── Agente 8: Busca Corporativa search-first (a cada 8h) ───────────────────
+// Parte de marcas/agências/executivos conhecidos → busca notícias via Tavily
+// → salva URLs descobertas → dispara extração.
+cron.schedule('30 1,9,17 * * *', async () => {
+  if (!process.env.TAVILY_API_KEY) { log('corporate-search', 'TAVILY_API_KEY não configurada, pulando'); return }
+  if (running.corporateSearch) { log('corporate-search', 'Já em execução, pulando'); return }
+  running.corporateSearch = true
+  log('corporate-search', 'Iniciando busca corporativa por entidades')
+  try {
+    const { runCorporateSearch } = require('./agents/corporateSearchAgent')
+    const result = await runCorporateSearch({ limitBrands: 40, limitAgencies: 20, limitLeaders: 20 })
+    log('corporate-search', `Concluído: ${result.articles_saved} artigos salvos (${result.entities_searched} entidades)`)
+  } catch (e) {
+    log('corporate-search', `Erro: ${e.message}`)
+  } finally {
+    running.corporateSearch = false
   }
 })
 

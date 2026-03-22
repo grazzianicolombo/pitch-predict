@@ -77,6 +77,22 @@ const SOURCE_CONFIGS = {
     hasFullContent: false,  // apenas título + subtitle + excerpt truncado
     rateMs: 1500,
   },
+  meioemensagem: {
+    name: 'meioemensagem',
+    label: 'Meio & Mensagem',
+    rssUrl: 'https://www.meioemensagem.com.br/feed/',
+    hasFullContent: false,
+    rateMs: 2000,
+    skipKeywordFilter: true, // publicação especializada em marketing/publicidade — todos os artigos são relevantes
+  },
+  adnews: {
+    name: 'adnews',
+    label: 'Adnews',
+    rssUrl: 'https://adnews.com.br/feed/',
+    hasFullContent: false,
+    rateMs: 2000,
+    skipKeywordFilter: true, // publicação especializada — todos os artigos são relevantes
+  },
 }
 
 // ─── Parser RSS genérico ──────────────────────────────────────────────────────
@@ -175,6 +191,13 @@ async function crawlSource(sourceName, keywords, existingUrls = new Set()) {
   for (const item of items) {
     // Dedup
     if (existingUrls.has(item.url)) continue
+
+    // Fontes especializadas em marketing/publicidade: salva todos os artigos
+    if (config.skipKeywordFilter) {
+      item.matched_keyword = '__all__'
+      relevant.push(item)
+      continue
+    }
 
     // Filtra por keyword
     const searchText = `${item.title} ${item.excerpt || ''}`
