@@ -2,14 +2,16 @@ require('dotenv').config({ override: true })
 const express = require('express')
 const cors = require('cors')
 
-const brandsRouter = require('./routes/brands')
-const sourcesRouter = require('./routes/sources')
-const fieldsRouter = require('./routes/fields')
-const variablesRouter = require('./routes/variables')
-const agenciesRouter = require('./routes/agencies')
+const brandsRouter      = require('./routes/brands')
+const sourcesRouter     = require('./routes/sources')
+const fieldsRouter      = require('./routes/fields')
+const variablesRouter   = require('./routes/variables')
+const agenciesRouter    = require('./routes/agencies')
 const agentRouter       = require('./routes/agent')
 const setupRouter       = require('./routes/setup')
 const predictionsRouter = require('./routes/predictions')
+const authRouter        = require('./routes/auth')
+const { requireAuth }   = require('./lib/auth')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -23,14 +25,18 @@ app.use(cors({
 app.use(express.json({ limit: '2mb' }))
 app.use(express.urlencoded({ extended: true }))
 
-app.use('/api/brands', brandsRouter)
-app.use('/api/sources', sourcesRouter)
-app.use('/api/fields', fieldsRouter)
-app.use('/api/variables', variablesRouter)
-app.use('/api/agencies', agenciesRouter)
-app.use('/api/agent', agentRouter)
-app.use('/api/setup', setupRouter)
-app.use('/api/predictions', predictionsRouter)
+// Autenticação — pública
+app.use('/api/auth', authRouter)
+
+// Todas as demais rotas exigem autenticação
+app.use('/api/brands',      requireAuth, brandsRouter)
+app.use('/api/sources',     requireAuth, sourcesRouter)
+app.use('/api/fields',      requireAuth, fieldsRouter)
+app.use('/api/variables',   requireAuth, variablesRouter)
+app.use('/api/agencies',    requireAuth, agenciesRouter)
+app.use('/api/agent',       requireAuth, agentRouter)
+app.use('/api/setup',       requireAuth, setupRouter)
+app.use('/api/predictions', requireAuth, predictionsRouter)
 
 // Inicia o scheduler de agentes automáticos
 require('./scheduler')

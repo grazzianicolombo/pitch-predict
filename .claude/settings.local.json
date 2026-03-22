@@ -121,7 +121,10 @@
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); r=d[''''items''''][0]; print\\(''''months_to_pitch:'''', r.get\\(''''months_to_pitch''''\\)\\); print\\(''''signal type:'''', type\\(r[''''signals''''][0]\\).__name__\\); print\\(''''signal:'''', r[''''signals''''][0]\\)\")",
       "Bash(jq -e '.hooks.Stop[] | .hooks[] | select\\(.type == \"\"command\"\"\\) | .command' /Users/tennet/Claude/pitch-predict/.claude/settings.json)",
       "Bash(curl -s http://localhost:3001/api/agent/active-jobs)",
-      "Bash(curl -s -X POST http://localhost:3001/api/agent/extract-editions-all -H \"Content-Type: application/json\" -d '{\"\"\"\"since_year\"\"\"\": 2022, \"\"\"\"batch\"\"\"\": 1200}')"
+      "Bash(curl -s -X POST http://localhost:3001/api/agent/extract-editions-all -H \"Content-Type: application/json\" -d '{\"\"\"\"since_year\"\"\"\": 2022, \"\"\"\"batch\"\"\"\": 1200}')",
+      "mcp__supabase__get_project",
+      "mcp__supabase__get_publishable_keys",
+      "Bash(curl -s -X POST http://localhost:3001/api/auth/login -H \"Content-Type: application/json\" -d '{\"\"\"\"email\"\"\"\":\"\"\"\"grazzi81@gmail.com\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"PitchAdmin@2026\"\"\"\"}')"
     ]
   },
   "enableAllProjectMcpServers": true,
