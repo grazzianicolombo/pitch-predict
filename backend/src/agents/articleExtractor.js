@@ -72,9 +72,9 @@ async function llmChat(prompt, { useMinimax = USE_MINIMAX } = {}) {
 }
 
 // ─── Concorrência ────────────────────────────────────────────────────────────
-// MiniMax não tem rate limit restritivo → pode aumentar concorrência
-const CONCURRENCY   = USE_MINIMAX ? 10 : 5
-const CHUNK_DELAY_MS = USE_MINIMAX ? 200 : 500
+// MiniMax não tem rate limit restritivo → alta concorrência
+const CONCURRENCY    = USE_MINIMAX ? 25 : 5
+const CHUNK_DELAY_MS = USE_MINIMAX ? 50  : 500
 
 // Mapas de promessas pendentes — evita race condition ao criar brand/agency nova
 // quando múltiplas coroutines processam ao mesmo tempo
