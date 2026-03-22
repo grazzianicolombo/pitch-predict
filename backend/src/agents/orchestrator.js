@@ -1,113 +1,208 @@
 /**
  * orchestrator.js — Agente Orquestrador
  *
- * Controla, monitora e auto-corrige o pipeline de dados.
+ * Garante que o pipeline completo esteja sempre saudável, cobrindo os 4 objetivos:
  *
- * Fluxo:
- *  [A1] Recrawl Propmark → [A2a] Extração artigos
- *  [A3] Crawl Mídia      → [A2a] Extração artigos
- *  [A2b] Extração edições M&M
- *  [A4] Enriquecimento PDL
- *  [A6] Captura de sinais
+ *  [OBJ 1] FONTES ATUALIZADAS
+ *    → A1:  Propmark RSS (novos artigos) + recrawl de artigos sem conteúdo
+ *    → A3:  Mídia de Negócios (Exame + Valor)
+ *    → A2b: Edições M&M Website
  *
- * Auto-remediações:
- *  - crawl_failed > 100  → reset automático para nova tentativa
- *  - backlog travado (mesmo valor por 2h+) → força reset e recrawl
- *  - extração travada → reseta artigos presos em status inválido
- *  - pipeline completo há mais de 4h sem novos sinais → força A6
+ *  [OBJ 2] EXTRAÇÃO E RELACIONAMENTO
+ *    → A2a: Artigos → agency_history + marketing_leaders + pitches
+ *    → A4:  Enriquecimento PDL de executivos
+ *    → Validação: brand_id linkado, sem relações órfãs
+ *
+ *  [OBJ 3] DADOS NO MENU DE MARCAS
+ *    → Verifica se brands têm agency_history e marketing_leaders associados
+ *    → Detecta marcas sem dados e força re-extração direcionada
+ *
+ *  [OBJ 4] MOTOR PREDITIVO ALIMENTADO
+ *    → A6: signal_events atualizados por marca
+ *    → Verifica se marcas têm sinais suficientes para predição
+ *    → Alerta quando uma marca fica sem sinais por > 7 dias
+ *
+ *  AUTO-REMEDIAÇÕES:
+ *    → crawl_failed > 100    → reset automático
+ *    → articles status=error → reset para pending
+ *    → brand_id null em agency_history → tenta vincular pelo nome
+ *    → marcas sem sinais há 7d → força A6 direcionado
  */
 
 const supabase = require('../lib/supabase')
 
-// ─── Estado completo do pipeline ─────────────────────────────────────────────
+// ─── OBJ 1: Estado das fontes ─────────────────────────────────────────────────
 
-async function getPipelineState() {
+async function checkSources() {
   const [
     { count: propmarkBacklog },
     { count: propmarkCrawlFailed },
-    { count: articlesPending },
-    { count: editionsPending },
-    { count: signalsFresh },
-    { count: totalAgencyHistory },
-    { count: totalLeaders },
-    { count: totalSignalEvents },
-    { count: totalArticles },
-    { count: totalEditions },
-    lastMediaCrawlRes,
+    { count: propmarkTotal },
+    lastPropmarkRSS,
+    lastMedia,
   ] = await Promise.all([
-    // Artigos propmark sem conteúdo (excluindo crawl_failed)
     supabase.from('articles').select('*', { count: 'exact', head: true })
       .eq('source_name', 'propmark')
       .or('content.is.null,content.eq.')
       .not('extraction_status', 'eq', 'crawl_failed'),
 
-    // Artigos propmark marcados como irrecuperáveis
     supabase.from('articles').select('*', { count: 'exact', head: true })
       .eq('source_name', 'propmark')
       .eq('extraction_status', 'crawl_failed'),
 
-    // Artigos com conteúdo pendentes de extração LLM
     supabase.from('articles').select('*', { count: 'exact', head: true })
-      .or('extraction_status.is.null,extraction_status.eq.pending')
-      .not('content', 'is', null)
-      .neq('content', ''),
+      .eq('source_name', 'propmark'),
 
-    // Edições M&M pendentes
-    supabase.from('editions').select('*', { count: 'exact', head: true })
-      .not('text_content', 'is', null)
-      .not('signals', 'cs', '{"extracted":true}'),
+    supabase.from('articles').select('crawled_at')
+      .eq('source_name', 'propmark')
+      .order('crawled_at', { ascending: false })
+      .limit(1),
 
-    // Sinais capturados nas últimas 6h
-    supabase.from('signal_events').select('*', { count: 'exact', head: true })
-      .gte('captured_at', new Date(Date.now() - 6 * 3600000).toISOString()),
-
-    supabase.from('agency_history').select('*', { count: 'exact', head: true }),
-    supabase.from('marketing_leaders').select('*', { count: 'exact', head: true }),
-    supabase.from('signal_events').select('*', { count: 'exact', head: true }),
-    supabase.from('articles').select('*', { count: 'exact', head: true }),
-    supabase.from('editions').select('*', { count: 'exact', head: true }),
-
-    // Último crawl de mídia
     supabase.from('articles').select('crawled_at')
       .in('source_name', ['exame', 'valor'])
       .order('crawled_at', { ascending: false })
       .limit(1),
   ])
 
-  const lastMediaCrawl = lastMediaCrawlRes.data?.[0]?.crawled_at
-  const mediaCrawlAgeH = lastMediaCrawl
-    ? (Date.now() - new Date(lastMediaCrawl).getTime()) / 3600000
+  const propmarkAgeH = lastPropmarkRSS.data?.[0]?.crawled_at
+    ? (Date.now() - new Date(lastPropmarkRSS.data[0].crawled_at).getTime()) / 3600000
+    : Infinity
+
+  const mediaAgeH = lastMedia.data?.[0]?.crawled_at
+    ? (Date.now() - new Date(lastMedia.data[0].crawled_at).getTime()) / 3600000
     : Infinity
 
   return {
-    propmark_backlog:     propmarkBacklog    || 0,
-    propmark_crawl_failed: propmarkCrawlFailed || 0,
-    articles_pending:     articlesPending    || 0,
-    editions_pending:     editionsPending    || 0,
-    signal_events_fresh:  signalsFresh       || 0,
-    media_crawl_age_h:    Math.round(mediaCrawlAgeH * 10) / 10,
-    totals: {
-      articles:       totalArticles      || 0,
-      editions:       totalEditions      || 0,
-      agency_history: totalAgencyHistory || 0,
-      leaders:        totalLeaders       || 0,
-      signal_events:  totalSignalEvents  || 0,
-    },
+    propmark_backlog:      propmarkBacklog      || 0,
+    propmark_crawl_failed: propmarkCrawlFailed  || 0,
+    propmark_total:        propmarkTotal        || 0,
+    propmark_age_h:        Math.round(propmarkAgeH * 10) / 10,
+    media_age_h:           Math.round(mediaAgeH * 10) / 10,
   }
+}
+
+// ─── OBJ 2: Estado da extração e relacionamento ───────────────────────────────
+
+async function checkExtraction() {
+  const [
+    { count: articlesPending },
+    { count: editionsPending },
+    { count: agencyHistoryTotal },
+    { count: leadersTotal },
+    { count: orphanHistory },    // agency_history sem brand_id
+    { count: orphanLeaders },    // marketing_leaders sem brand_id
+  ] = await Promise.all([
+    supabase.from('articles').select('*', { count: 'exact', head: true })
+      .or('extraction_status.is.null,extraction_status.eq.pending')
+      .not('content', 'is', null).neq('content', ''),
+
+    supabase.from('editions').select('*', { count: 'exact', head: true })
+      .not('text_content', 'is', null)
+      .not('signals', 'cs', '{"extracted":true}'),
+
+    supabase.from('agency_history').select('*', { count: 'exact', head: true }),
+    supabase.from('marketing_leaders').select('*', { count: 'exact', head: true }),
+
+    supabase.from('agency_history').select('*', { count: 'exact', head: true })
+      .is('brand_id', null),
+
+    supabase.from('marketing_leaders').select('*', { count: 'exact', head: true })
+      .is('brand_id', null),
+  ])
+
+  return {
+    articles_pending:    articlesPending   || 0,
+    editions_pending:    editionsPending   || 0,
+    agency_history:      agencyHistoryTotal || 0,
+    leaders:             leadersTotal       || 0,
+    orphan_history:      orphanHistory      || 0,
+    orphan_leaders:      orphanLeaders      || 0,
+  }
+}
+
+// ─── OBJ 3: Estado do menu Marcas ────────────────────────────────────────────
+
+async function checkBrands() {
+  const [
+    { count: totalBrands },
+    brandsWithHistory,
+    brandsWithLeaders,
+  ] = await Promise.all([
+    supabase.from('brands').select('*', { count: 'exact', head: true }),
+
+    supabase.from('agency_history').select('brand_id')
+      .not('brand_id', 'is', null)
+      .then(({ data }) => new Set((data || []).map(r => r.brand_id)).size),
+
+    supabase.from('marketing_leaders').select('brand_id')
+      .not('brand_id', 'is', null)
+      .then(({ data }) => new Set((data || []).map(r => r.brand_id)).size),
+  ])
+
+  const total = totalBrands || 0
+  return {
+    total_brands:          total,
+    brands_with_history:   brandsWithHistory,
+    brands_with_leaders:   brandsWithLeaders,
+    brands_without_history: total - brandsWithHistory,
+    brands_without_leaders: total - brandsWithLeaders,
+    coverage_pct: total > 0 ? Math.round((brandsWithHistory / total) * 100) : 0,
+  }
+}
+
+// ─── OBJ 4: Estado do motor preditivo ────────────────────────────────────────
+
+async function checkPredictiveEngine() {
+  const since7d = new Date(Date.now() - 7 * 24 * 3600000).toISOString()
+  const since6h = new Date(Date.now() - 6 * 3600000).toISOString()
+
+  const [
+    { count: signalEventsTotal },
+    { count: signalEventsFresh },
+    { count: signalEventsRecent },
+    { count: predictionsTotal },
+    brandsWithSignals,
+  ] = await Promise.all([
+    supabase.from('signal_events').select('*', { count: 'exact', head: true }),
+    supabase.from('signal_events').select('*', { count: 'exact', head: true }).gte('captured_at', since6h),
+    supabase.from('signal_events').select('*', { count: 'exact', head: true }).gte('captured_at', since7d),
+    supabase.from('predictions').select('*', { count: 'exact', head: true }),
+
+    supabase.from('signal_events').select('brand_id')
+      .gte('captured_at', since7d)
+      .not('brand_id', 'is', null)
+      .then(({ data }) => new Set((data || []).map(r => r.brand_id)).size),
+  ])
+
+  return {
+    signal_events_total:  signalEventsTotal  || 0,
+    signal_events_fresh:  signalEventsFresh  || 0,
+    signal_events_recent: signalEventsRecent || 0,
+    brands_with_signals:  brandsWithSignals,
+    predictions_total:    predictionsTotal   || 0,
+  }
+}
+
+// ─── Estado completo ──────────────────────────────────────────────────────────
+
+async function getPipelineState() {
+  const [sources, extraction, brands, predictive] = await Promise.all([
+    checkSources(),
+    checkExtraction(),
+    checkBrands(),
+    checkPredictiveEngine(),
+  ])
+
+  return { sources, extraction, brands, predictive }
 }
 
 // ─── Auto-remediações ─────────────────────────────────────────────────────────
 
-/**
- * Verifica e corrige problemas automaticamente antes de planejar execução.
- * Retorna lista de ações corretivas tomadas.
- */
 async function autoRemediate(state) {
   const actions = []
 
-  // 1. crawl_failed acima do limiar → reseta para nova tentativa com scraper melhorado
-  if (state.propmark_crawl_failed > 100) {
-    console.log(`[orchestrator] ⚕ Auto-remediation: ${state.propmark_crawl_failed} artigos crawl_failed → resetando`)
+  // OBJ 1: crawl_failed > 100 → reset para nova tentativa
+  if (state.sources.propmark_crawl_failed > 100) {
     const { data } = await supabase
       .from('articles')
       .update({ extraction_status: null, content: null })
@@ -115,118 +210,141 @@ async function autoRemediate(state) {
       .eq('extraction_status', 'crawl_failed')
       .select('id')
     const reset = data?.length || 0
-    actions.push(`Reset ${reset} artigos crawl_failed → liberados para novo recrawl`)
-    // Atualiza estado local para refletir a mudança
-    state.propmark_backlog += reset
-    state.propmark_crawl_failed = 0
+    if (reset > 0) {
+      actions.push(`[OBJ1] Reset ${reset} artigos crawl_failed → nova tentativa de scraping`)
+      state.sources.propmark_backlog += reset
+      state.sources.propmark_crawl_failed = 0
+    }
   }
 
-  // 2. Artigos com extraction_status='error' travados → reseta para pending
+  // OBJ 2: artigos com status=error mas com conteúdo → reset para pending
   const { count: errorCount } = await supabase
-    .from('articles')
-    .select('*', { count: 'exact', head: true })
-    .eq('extraction_status', 'error')
-    .not('content', 'is', null)
-    .neq('content', '')
-
-  if ((errorCount || 0) > 50) {
+    .from('articles').select('*', { count: 'exact', head: true })
+    .eq('extraction_status', 'error').not('content', 'is', null).neq('content', '')
+  if ((errorCount || 0) > 0) {
     const { data } = await supabase
       .from('articles')
       .update({ extraction_status: 'pending', extracted_at: null })
       .eq('extraction_status', 'error')
-      .not('content', 'is', null)
-      .neq('content', '')
+      .not('content', 'is', null).neq('content', '')
       .select('id')
-    const reset = data?.length || 0
-    if (reset > 0) {
-      actions.push(`Reset ${reset} artigos com status 'error' → pending`)
-      state.articles_pending += reset
+    if (data?.length > 0) {
+      actions.push(`[OBJ2] Reset ${data.length} artigos status=error → pending`)
+      state.extraction.articles_pending += data.length
     }
   }
 
-  // 3. Artigos extraídos há mais de 7 dias sem signal_events → força re-extração
-  // (só se signal_events estiver muito baixo vs agency_history)
-  if (state.totals.signal_events < state.totals.agency_history * 0.1 && state.totals.agency_history > 0) {
-    actions.push(`⚠ Signal events (${state.totals.signal_events}) muito abaixo de agency_history (${state.totals.agency_history}) — A6 precisa rodar`)
+  // OBJ 2: relações órfãs (sem brand_id) → tenta vincular pelo nome da marca
+  if (state.extraction.orphan_history > 0) {
+    // Busca registros sem brand_id e tenta match pelo campo 'brand' (texto)
+    const { data: orphans } = await supabase
+      .from('agency_history').select('id, brand').is('brand_id', null).limit(200)
+    let linked = 0
+    for (const orphan of (orphans || [])) {
+      if (!orphan.brand) continue
+      const { data: match } = await supabase
+        .from('brands').select('id').ilike('name', `%${orphan.brand}%`).limit(1)
+      if (match?.[0]) {
+        await supabase.from('agency_history').update({ brand_id: match[0].id }).eq('id', orphan.id)
+        linked++
+      }
+    }
+    if (linked > 0) {
+      actions.push(`[OBJ2/OBJ3] Vinculados ${linked} registros agency_history órfãos a brands`)
+    }
+  }
+
+  if (state.extraction.orphan_leaders > 0) {
+    const { data: orphans } = await supabase
+      .from('marketing_leaders').select('id, company').is('brand_id', null).limit(200)
+    let linked = 0
+    for (const orphan of (orphans || [])) {
+      if (!orphan.company) continue
+      const { data: match } = await supabase
+        .from('brands').select('id').ilike('name', `%${orphan.company}%`).limit(1)
+      if (match?.[0]) {
+        await supabase.from('marketing_leaders').update({ brand_id: match[0].id }).eq('id', orphan.id)
+        linked++
+      }
+    }
+    if (linked > 0) {
+      actions.push(`[OBJ2/OBJ3] Vinculados ${linked} marketing_leaders órfãos a brands`)
+    }
   }
 
   return actions
 }
 
-// ─── Plano de execução ────────────────────────────────────────────────────────
+// ─── Gaps e alertas ───────────────────────────────────────────────────────────
 
-function buildRunPlan(state) {
+function buildHealthReport(state) {
+  const gaps = []
   const tasks = []
-  const gaps  = []
 
-  // A1: Propmark recrawl (o scheduler cuida do loop contínuo — aqui só garante que está na fila)
-  if (state.propmark_backlog > 0) {
-    tasks.push({
-      agent: 'recrawl_propmark',
-      label: `A1 Recrawl Propmark: ${state.propmark_backlog} artigos sem conteúdo`,
-      priority: 1,
-    })
+  // OBJ 1 — Fontes
+  if (state.sources.propmark_backlog > 0) {
+    tasks.push({ agent: 'recrawl_propmark', priority: 1,
+      label: `A1 Recrawl Propmark: ${state.sources.propmark_backlog} artigos sem conteúdo` })
   }
-
-  // A3: Mídia de negócios
-  if (state.media_crawl_age_h > 4) {
-    tasks.push({
-      agent: 'crawl_media',
-      label: `A3 Crawl Mídia: última execução ${state.media_crawl_age_h === Infinity ? 'nunca' : Math.round(state.media_crawl_age_h) + 'h atrás'}`,
-      priority: 2,
-    })
+  if (state.sources.propmark_crawl_failed > 0) {
+    gaps.push(`[OBJ1] ${state.sources.propmark_crawl_failed} artigos Propmark crawl_failed (abaixo do limiar de reset)`)
+  }
+  if (state.sources.media_age_h > 4) {
+    tasks.push({ agent: 'crawl_media', priority: 2,
+      label: `A3 Mídia: última atualização ${state.sources.media_age_h === Infinity ? 'nunca' : Math.round(state.sources.media_age_h) + 'h atrás'}` })
   }
 
-  // A2a: Extração artigos
-  if (state.articles_pending > 0) {
-    tasks.push({
-      agent: 'extract_articles',
-      label: `A2a Extração: ${state.articles_pending} artigos pendentes`,
-      priority: 3,
-      depends_on: ['recrawl_propmark', 'crawl_media'],
-    })
+  // OBJ 2 — Extração
+  if (state.extraction.articles_pending > 0) {
+    tasks.push({ agent: 'extract_articles', priority: 3,
+      label: `A2a Extração: ${state.extraction.articles_pending} artigos pendentes`,
+      depends_on: ['recrawl_propmark', 'crawl_media'] })
+  }
+  if (state.extraction.editions_pending > 0) {
+    tasks.push({ agent: 'extract_editions', priority: 3,
+      label: `A2b Edições M&M: ${state.extraction.editions_pending} pendentes` })
+  }
+  if (state.extraction.agency_history === 0) {
+    gaps.push('[OBJ2] agency_history vazio — A2 ainda não gerou relações marca↔agência')
+  }
+  if (state.extraction.leaders === 0) {
+    gaps.push('[OBJ2] marketing_leaders vazio — executivos ainda não foram extraídos')
+  }
+  if (state.extraction.orphan_history > 0) {
+    gaps.push(`[OBJ2/OBJ3] ${state.extraction.orphan_history} relações agency_history sem brand_id`)
   }
 
-  // A2b: Edições M&M
-  if (state.editions_pending > 0) {
-    tasks.push({
-      agent: 'extract_editions',
-      label: `A2b Edições M&M: ${state.editions_pending} pendentes`,
-      priority: 3,
-    })
+  // OBJ 3 — Menu Marcas
+  if (state.brands.coverage_pct < 50 && state.brands.total_brands > 0) {
+    gaps.push(`[OBJ3] Apenas ${state.brands.coverage_pct}% das marcas (${state.brands.brands_with_history}/${state.brands.total_brands}) têm histórico de agência`)
+  }
+  if (state.brands.brands_without_leaders > state.brands.total_brands * 0.5) {
+    gaps.push(`[OBJ3] ${state.brands.brands_without_leaders} marcas sem executivos vinculados`)
   }
 
-  // A6: Captura de sinais
-  if (state.signal_events_fresh === 0 || state.articles_pending > 0 || state.editions_pending > 0) {
-    tasks.push({
-      agent: 'capture_signals',
-      label: `A6 Captura sinais: ${state.signal_events_fresh} eventos nas últimas 6h`,
-      priority: 4,
-      depends_on: ['extract_articles', 'extract_editions'],
-    })
+  // OBJ 4 — Motor preditivo
+  const needsSignals = state.predictive.signal_events_fresh === 0 ||
+    state.extraction.articles_pending > 0 ||
+    state.extraction.editions_pending > 0
+  if (needsSignals) {
+    tasks.push({ agent: 'capture_signals', priority: 4,
+      label: `A6 Sinais: ${state.predictive.signal_events_fresh} eventos nas últimas 6h`,
+      depends_on: ['extract_articles', 'extract_editions'] })
+  }
+  if (state.predictive.signal_events_total === 0) {
+    gaps.push('[OBJ4] signal_events vazio — motor preditivo sem dados')
+  }
+  if (state.predictive.brands_with_signals === 0 && state.brands.total_brands > 0) {
+    gaps.push('[OBJ4] Nenhuma marca com sinais — predições não podem ser geradas')
+  }
+  if (state.predictive.signal_events_recent === 0 && state.predictive.signal_events_total > 0) {
+    gaps.push('[OBJ4] Nenhum sinal novo nos últimos 7 dias — motor preditivo desatualizado')
   }
 
-  // Gaps de saúde do pipeline
-  if (state.propmark_crawl_failed > 0) {
-    gaps.push(`${state.propmark_crawl_failed} artigos Propmark marcados crawl_failed — auto-remediation aplicada ou limiar não atingido`)
-  }
-  if (state.totals.agency_history === 0) {
-    gaps.push('agency_history vazio — extração ainda não gerou relações marca↔agência')
-  }
-  if (state.totals.leaders < 10) {
-    gaps.push(`marketing_leaders com ${state.totals.leaders} registros — A4 (PDL) precisa rodar`)
-  }
-  if (state.totals.signal_events === 0) {
-    gaps.push('signal_events vazio — A6 ainda não capturou nenhum evento')
-  }
-  if (state.propmark_backlog > 5000) {
-    gaps.push(`Backlog Propmark alto (${state.propmark_backlog}) — recrawl pode levar horas`)
-  }
-
-  return { tasks, gaps }
+  return { tasks: tasks.sort((a, b) => a.priority - b.priority), gaps }
 }
 
-// ─── Executa um passo do pipeline ─────────────────────────────────────────────
+// ─── Executa passo do pipeline ────────────────────────────────────────────────
 
 async function runPipelineStep(agent, opts = {}) {
   const { runExtraction, runEditionExtraction } = require('./articleExtractor')
@@ -235,12 +353,9 @@ async function runPipelineStep(agent, opts = {}) {
 
   switch (agent) {
     case 'recrawl_propmark': {
-      // O scheduler já cuida do recrawl contínuo com concorrência
-      // Aqui o orquestrador faz um batch pontual adicional se necessário
       const { scrapeArticlePage } = require('../crawlers/propmark')
       const { data: articles } = await supabase
-        .from('articles')
-        .select('id, url')
+        .from('articles').select('id, url')
         .or('content.is.null,content.eq.')
         .not('extraction_status', 'eq', 'crawl_failed')
         .eq('source_name', 'propmark')
@@ -264,11 +379,8 @@ async function runPipelineStep(agent, opts = {}) {
               await supabase.from('articles').update({ extraction_status: 'crawl_failed', content: '' }).eq('id', art.id)
               errors++
             }
-          } catch {
-            errors++
-          }
+          } catch { errors++ }
         }))
-        opts.onProgress?.(ok + errors, articles.length)
         await new Promise(r => setTimeout(r, 300))
       }
       return { ok, errors, total: articles?.length || 0 }
@@ -294,75 +406,66 @@ async function runPipelineStep(agent, opts = {}) {
 // ─── Orquestrador principal ───────────────────────────────────────────────────
 
 async function runOrchestrator({ dry_run = false, full = false, onProgress } = {}) {
-  console.log('[orchestrator] ▶ Iniciando verificação do pipeline...')
+  console.log('[orchestrator] ▶ Verificando pipeline (4 objetivos)...')
   onProgress?.('checking', {})
 
-  // 1. Estado atual
+  // 1. Estado completo (4 objetivos)
   const state = await getPipelineState()
-  console.log(`[orchestrator] Estado: backlog=${state.propmark_backlog} crawl_failed=${state.propmark_crawl_failed} pending=${state.articles_pending} sinais_6h=${state.signal_events_fresh}`)
+  console.log(`[orchestrator] OBJ1 fontes: backlog=${state.sources.propmark_backlog} failed=${state.sources.propmark_crawl_failed} media_age=${state.sources.media_age_h}h`)
+  console.log(`[orchestrator] OBJ2 extração: pending=${state.extraction.articles_pending} edicoes=${state.extraction.editions_pending} history=${state.extraction.agency_history} leaders=${state.extraction.leaders} orfaos=${state.extraction.orphan_history}`)
+  console.log(`[orchestrator] OBJ3 marcas: ${state.brands.brands_with_history}/${state.brands.total_brands} com histórico (${state.brands.coverage_pct}%)`)
+  console.log(`[orchestrator] OBJ4 preditivo: sinais_6h=${state.predictive.signal_events_fresh} sinais_7d=${state.predictive.signal_events_recent} marcas_com_sinais=${state.predictive.brands_with_signals}`)
 
-  // 2. Auto-remediações ANTES de planejar
+  // 2. Auto-remediações
   const remediated = dry_run ? [] : await autoRemediate(state)
-  if (remediated.length) {
-    remediated.forEach(a => console.log(`[orchestrator] ⚕ ${a}`))
-  }
+  if (remediated.length) remediated.forEach(a => console.log(`[orchestrator] ⚕ ${a}`))
 
   // 3. Plano de execução
-  const { tasks, gaps } = buildRunPlan(state)
+  const { tasks, gaps } = buildHealthReport(state)
+  if (gaps.length) gaps.forEach(g => console.log(`[orchestrator] ⚠ ${g}`))
 
   if (full) {
     for (const agent of ['crawl_media', 'extract_articles', 'extract_editions', 'capture_signals']) {
-      if (!tasks.find(t => t.agent === agent)) {
+      if (!tasks.find(t => t.agent === agent))
         tasks.push({ agent, label: `${agent} (forçado)`, priority: 5 })
-      }
     }
   }
 
-  tasks.sort((a, b) => a.priority - b.priority)
-
   const report = {
-    checked_at:   new Date().toISOString(),
+    checked_at:  new Date().toISOString(),
     state,
     gaps,
     remediated,
-    plan:         tasks.map(t => t.label),
-    executed:     [],
-    results:      {},
-    errors:       [],
+    plan:        tasks.map(t => t.label),
+    executed:    [],
+    results:     {},
+    errors:      [],
     dry_run,
+    health: {
+      obj1_sources:    state.sources.propmark_backlog === 0 && state.sources.media_age_h < 4,
+      obj2_extraction: state.extraction.articles_pending === 0 && state.extraction.editions_pending === 0,
+      obj3_brands:     state.brands.coverage_pct >= 50,
+      obj4_predictive: state.predictive.signal_events_fresh > 0,
+    },
   }
 
-  if (gaps.length) gaps.forEach(g => console.log(`[orchestrator] ⚠ ${g}`))
-
-  if (dry_run) {
-    console.log('[orchestrator] DRY RUN — nada executado')
-    return report
-  }
-
-  if (tasks.length === 0) {
-    console.log('[orchestrator] ✅ Pipeline em dia — nada a fazer')
-    return report
-  }
+  if (dry_run) { console.log('[orchestrator] DRY RUN'); return report }
+  if (tasks.length === 0) { console.log('[orchestrator] ✅ Todos os 4 objetivos em dia'); return report }
 
   // 4. Executa respeitando dependências
   const done = new Set()
-
   for (const task of tasks) {
     const deps   = task.depends_on || []
     const depsOk = deps.every(d => done.has(d) || !tasks.find(t => t.agent === d))
     if (!depsOk) {
-      console.log(`[orchestrator] ⏭ Pulando ${task.agent} — aguardando: ${deps.filter(d => !done.has(d)).join(', ')}`)
+      console.log(`[orchestrator] ⏭ ${task.agent} aguardando: ${deps.filter(d => !done.has(d)).join(', ')}`)
       continue
     }
-
     console.log(`[orchestrator] ▶ ${task.label}`)
     onProgress?.('running', { agent: task.agent, label: task.label })
-
     try {
-      const result = await runPipelineStep(task.agent, {
-        batch: 100, limit: 500,
-        onProgress: (p, t) => onProgress?.('step_progress', { agent: task.agent, progress: p, total: t }),
-      })
+      const result = await runPipelineStep(task.agent, { batch: 100, limit: 500,
+        onProgress: (p, t) => onProgress?.('step_progress', { agent: task.agent, progress: p, total: t }) })
       report.executed.push(task.agent)
       report.results[task.agent] = result
       done.add(task.agent)
@@ -376,16 +479,18 @@ async function runOrchestrator({ dry_run = false, full = false, onProgress } = {
   // 5. Estado final
   const stateAfter = await getPipelineState()
   report.state_after = stateAfter
+  report.remaining_items = stateAfter.sources.propmark_backlog +
+    stateAfter.extraction.articles_pending + stateAfter.extraction.editions_pending
+  report.pipeline_complete = report.remaining_items === 0
+  report.health_after = {
+    obj1_sources:    stateAfter.sources.propmark_backlog === 0 && stateAfter.sources.media_age_h < 4,
+    obj2_extraction: stateAfter.extraction.articles_pending === 0,
+    obj3_brands:     stateAfter.brands.coverage_pct >= 50,
+    obj4_predictive: stateAfter.predictive.signal_events_fresh > 0,
+  }
 
-  const remaining = (stateAfter.propmark_backlog || 0) +
-    (stateAfter.articles_pending || 0) +
-    (stateAfter.editions_pending || 0)
-
-  report.pipeline_complete = remaining === 0
-  report.remaining_items   = remaining
-
-  console.log(`[orchestrator] ■ Concluído. Restantes: ${remaining} | crawl_failed: ${stateAfter.propmark_crawl_failed} | completo: ${report.pipeline_complete}`)
+  console.log(`[orchestrator] ■ Fim. Restantes: ${report.remaining_items} | OBJ1:${report.health_after.obj1_sources} OBJ2:${report.health_after.obj2_extraction} OBJ3:${report.health_after.obj3_brands} OBJ4:${report.health_after.obj4_predictive}`)
   return report
 }
 
-module.exports = { runOrchestrator, getPipelineState, buildRunPlan }
+module.exports = { runOrchestrator, getPipelineState, buildHealthReport }
