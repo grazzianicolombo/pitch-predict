@@ -70,7 +70,8 @@ const { generateCsrfToken, doubleCsrfProtection } = doubleCsrf({
   cookieName:            'pp_csrf',
   cookieOptions: {
     httpOnly: false,    // deve ser legível pelo JS do frontend para envio no header
-    sameSite: 'strict',
+    // SameSite=None necessário pois frontend (Vercel) e backend (Railway) são origens diferentes
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     secure:   process.env.NODE_ENV === 'production',
     path:     '/',
   },

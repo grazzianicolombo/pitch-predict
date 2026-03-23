@@ -32,6 +32,10 @@ function escapeHtml(str) {
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
 const IS_PROD = process.env.NODE_ENV === 'production'
+// Frontend (Vercel) e backend (Railway) são origens diferentes — SameSite=None é necessário
+// para que o browser envie cookies httpOnly em requests cross-origin (withCredentials: true).
+// SameSite=None requer Secure=true (HTTPS), o que é garantido em produção.
+const SAME_SITE = IS_PROD ? 'none' : 'lax'
 
 // ACCESS TOKEN — curta duração, lido pelo requireAuth
 function setAuthCookies(res, session, remember = true) {
@@ -43,22 +47,22 @@ function setAuthCookies(res, session, remember = true) {
   res.cookie('pp_access_token', session.access_token, {
     httpOnly: true,
     secure:   IS_PROD,
-    sameSite: 'strict',
+    sameSite: SAME_SITE,
     path:     '/',
     maxAge:   accessMaxAge * 1000, // ms
   })
   res.cookie('pp_refresh_token', session.refresh_token, {
     httpOnly: true,
     secure:   IS_PROD,
-    sameSite: 'strict',
+    sameSite: SAME_SITE,
     path:     '/', // path='/' para compatibilidade com proxies reversos (Railway/nginx)
     maxAge:   refreshMaxAge * 1000,
   })
 }
 
 function clearAuthCookies(res) {
-  res.clearCookie('pp_access_token',  { httpOnly: true, secure: IS_PROD, sameSite: 'strict', path: '/' })
-  res.clearCookie('pp_refresh_token', { httpOnly: true, secure: IS_PROD, sameSite: 'strict', path: '/' })
+  res.clearCookie('pp_access_token',  { httpOnly: true, secure: IS_PROD, sameSite: SAME_SITE, path: '/' })
+  res.clearCookie('pp_refresh_token', { httpOnly: true, secure: IS_PROD, sameSite: SAME_SITE, path: '/' })
 }
 
 // ─── Rate limiters ────────────────────────────────────────────────────────────
@@ -152,7 +156,7 @@ router.post('/login', authLimiter, async (req, res) => {
     if (verifiedTotp) {
       // Armazena sessão temporária (10min) para verificação do TOTP
       res.cookie('pp_mfa_token', data.session.access_token, {
-        httpOnly: true, secure: IS_PROD, sameSite: 'strict', path: '/', maxAge: 10 * 60 * 1000,
+        httpOnly: true, secure: IS_PROD, sameSite: SAME_SITE, path: '/', maxAge: 10 * 60 * 1000,
       })
       securityLog(req, 'MFA_CHALLENGE_ISSUED', { userId: data.user.id, email })
       return res.json({ mfa_required: true, factor_id: verifiedTotp.id })
@@ -508,7 +512,7 @@ router.post('/mfa/login-verify', mfaLimiter, async (req, res) => {
     .single()
   if (!profile?.active) return res.status(403).json({ error: 'Usuário desativado' })
 
-  res.clearCookie('pp_mfa_token', { httpOnly: true, secure: IS_PROD, sameSite: 'strict', path: '/' })
+  res.clearCookie('pp_mfa_token', { httpOnly: true, secure: IS_PROD, sameSite: SAME_SITE, path: '/' })
   setAuthCookies(res, sessionData.session, true)
   securityLog(req, 'MFA_VERIFY_SUCCESS', { userId: sessionData.session.user.id })
   res.json({
