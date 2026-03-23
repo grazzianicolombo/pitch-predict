@@ -136,9 +136,28 @@ async function loadLocalArticles(brandName) {
   return data || []
 }
 
+// ─── Normaliza nome de agência contra lista canônica ─────────────────────────
+// Resolve aliases históricos (ex: "Leo Burnett Tailormade" → "Leo").
+// Retorna null se nenhuma agência da lista corresponder.
+function matchCanonicalAgency(raw, canonicals) {
+  if (!raw || !canonicals.length) return null
+  const rawLow = raw.toLowerCase().trim()
+  const list = canonicals.map(n => ({ name: n, low: n.toLowerCase().trim() }))
+  // 1. Match exato
+  const exact = list.find(({ low }) => low === rawLow)
+  if (exact) return exact.name
+  // 2. Nome canônico é prefixo do nome bruto ("Leo" → "Leo Burnett Tailormade")
+  const prefix = list.find(({ low }) => rawLow.startsWith(low + ' ') || rawLow.startsWith(low + ','))
+  if (prefix) return prefix.name
+  // 3. Nome bruto é prefixo do nome canônico
+  const revPrefix = list.find(({ low }) => low.startsWith(rawLow + ' ') || low.startsWith(rawLow + ','))
+  if (revPrefix) return revPrefix.name
+  return null
+}
+
 // ─── Analisa evidências via Claude Haiku ──────────────────────────────────────
 
-async function analyzeAgencyStatus(brand, webResults, localArticles) {
+async function analyzeAgencyStatus(brand, webResults, localArticles, canonicalAgencies) {
   const activeAgenciesText = brand.active_agencies
     .map(a => `- ${a.agency} (escopo: ${a.scope}, desde: ${a.year_start}${a.month_start ? `/${String(a.month_start).padStart(2,'0')}` : ''})`)
     .join('\n')
@@ -154,12 +173,19 @@ async function analyzeAgencyStatus(brand, webResults, localArticles) {
   const now = new Date()
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
 
+  const canonicalsText = canonicalAgencies.length
+    ? canonicalAgencies.map(n => `- ${n}`).join('\n')
+    : '(lista não disponível)'
+
   const prompt = `Você é um analista especialista em movimentações de contas publicitárias no mercado brasileiro. Analise as evidências abaixo sobre a marca "${brand.name}" e determine se a agência registrada no sistema ainda é a atual.
 
 DATA DE HOJE: ${currentMonth}
 
 AGÊNCIAS REGISTRADAS COMO ATIVAS NO SISTEMA (podem estar desatualizadas):
 ${activeAgenciesText || '(nenhuma agência registrada — precisa identificar a atual)'}
+
+LISTA OFICIAL DE AGÊNCIAS (2025) — use APENAS nomes desta lista:
+${canonicalsText}
 
 EVIDÊNCIAS DA WEB (notícias e artigos):
 ${webEvidenceText || '(nenhuma notícia encontrada)'}
@@ -170,7 +196,7 @@ ${localEvidenceText || '(nenhum artigo local)'}
 Responda APENAS com JSON válido:
 {
   "agency_changed": true | false,
-  "new_agency": "Nome exato da nova agência" | null,
+  "new_agency": "Nome EXATO da lista oficial" | null,
   "new_scope": "Criação" | "Mídia" | "Digital" | "PR" | "Geral" | null,
   "confidence": "alta" | "media" | "baixa",
   "evidence_summary": "1-2 frases descrevendo a evidência encontrada",
@@ -183,7 +209,7 @@ Regras de análise:
 - "confidence": "alta" = agência nomeada diretamente no artigo como responsável pela conta/campanha. "media" = agência fortemente sugerida pelo contexto (ex: criou campanha recente, ganhou pitch). "baixa" = menção tangencial sem clareza.
 - Se a agência registrada aparece confirmada nas notícias recentes → agency_changed: false, confidence: alta.
 - Se não há evidência suficiente → agency_changed: false, confidence: baixa, evidence_summary explica a ausência.
-- "new_agency" deve ser o nome EXATO como aparece nos artigos (ex: "AlmapBBDO", "Ogilvy Brasil", "VMLY&R").
+- "new_agency" OBRIGATORIAMENTE deve ser um nome da LISTA OFICIAL acima. Se a agência identificada não estiver na lista, use null e defina confidence como "baixa".
 - Ignore agências de mídia programática, produtoras e consultorias — foco em agências criativas/de comunicação.`
 
   try {
@@ -285,6 +311,11 @@ async function runCurrentAgencyValidation({ limit = 50, onProgress } = {}) {
 
   console.log('[current-agency] Iniciando validação de agências atuais')
 
+  // Carrega lista canônica de agências (menu Agências — lista 2025)
+  const { data: agencyProfilesRows } = await supabase.from('agency_profiles').select('name')
+  const canonicalAgencies = (agencyProfilesRows || []).map(a => a.name)
+  console.log(`[current-agency] ${canonicalAgencies.length} agências canônicas carregadas`)
+
   const brands = await loadBrandsWithActiveAgencies(limit)
   console.log(`[current-agency] ${brands.length} marcas com agências ativas`)
 
@@ -307,11 +338,22 @@ async function runCurrentAgencyValidation({ limit = 50, onProgress } = {}) {
         loadLocalArticles(brand.name),
       ])
 
-      const analysis = await analyzeAgencyStatus(brand, webResults, localArticles)
+      const analysis = await analyzeAgencyStatus(brand, webResults, localArticles, canonicalAgencies)
 
       if (!analysis) {
         stats.errors++
         continue
+      }
+
+      // Normaliza new_agency contra a lista canônica — descarta se não bater com nenhuma agência da lista
+      if (analysis.agency_changed && analysis.new_agency) {
+        const canonical = matchCanonicalAgency(analysis.new_agency, canonicalAgencies)
+        if (!canonical) {
+          console.log(`[current-agency] ⚠ ${brand.name}: agência "${analysis.new_agency}" não encontrada na lista 2025 — ignorado`)
+          analysis.agency_changed = false
+        } else {
+          analysis.new_agency = canonical  // usa nome canônico exato
+        }
       }
 
       stats.brands_analyzed++
