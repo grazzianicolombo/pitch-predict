@@ -205,17 +205,70 @@ async function checkPredictiveEngine() {
   }
 }
 
+// ─── OBJ: Métricas de eficiência do pipeline ──────────────────────────────────
+
+async function checkEfficiency() {
+  const [
+    { count: articlesWithContent },
+    { count: articlesExtractedOk },
+    { count: articlesCrawlFailed },
+    { count: articlesTotal },
+    { count: articlesExtractionError },
+    { count: editionsTotal },
+    { count: editionsExtracted },
+  ] = await Promise.all([
+    supabase.from('articles').select('*', { count: 'exact', head: true })
+      .not('content', 'is', null).neq('content', ''),
+
+    supabase.from('articles').select('*', { count: 'exact', head: true })
+      .in('extraction_status', ['ok', 'skipped']),
+
+    supabase.from('articles').select('*', { count: 'exact', head: true })
+      .eq('extraction_status', 'crawl_failed'),
+
+    supabase.from('articles').select('*', { count: 'exact', head: true }),
+
+    supabase.from('articles').select('*', { count: 'exact', head: true })
+      .eq('extraction_status', 'error'),
+
+    supabase.from('editions').select('*', { count: 'exact', head: true })
+      .not('text_content', 'is', null),
+
+    supabase.from('editions').select('*', { count: 'exact', head: true })
+      .not('text_content', 'is', null)
+      .filter('signals', 'cs', '{"extracted":true}'),
+  ])
+
+  const total = articlesTotal || 0
+  const withContent = articlesWithContent || 0
+  const crawlFailed = articlesCrawlFailed || 0
+  const extractedOk = articlesExtractedOk || 0
+  const extractionError = articlesExtractionError || 0
+  const edTotal = editionsTotal || 0
+  const edExtracted = editionsExtracted || 0
+
+  return {
+    crawl_fail_rate:      total > 0 ? Math.round((crawlFailed / total) * 1000) / 10 : 0,
+    extraction_ok_rate:   withContent > 0 ? Math.round((extractedOk / withContent) * 1000) / 10 : 0,
+    extraction_error_count: extractionError,
+    articles_with_content:  withContent,
+    articles_crawl_failed:  crawlFailed,
+    editions_extracted_pct: edTotal > 0 ? Math.round((edExtracted / edTotal) * 1000) / 10 : 0,
+  }
+}
+
 // ─── Estado completo ──────────────────────────────────────────────────────────
 
 async function getPipelineState() {
-  const [sources, extraction, brands, predictive] = await Promise.all([
+  const [sources, extraction, brands, predictive, efficiency] = await Promise.all([
     checkSources(),
     checkExtraction(),
     checkBrands(),
     checkPredictiveEngine(),
+    checkEfficiency(),
   ])
 
-  return { sources, extraction, brands, predictive }
+  return { sources, extraction, brands, predictive, efficiency }
 }
 
 // ─── Auto-remediações ─────────────────────────────────────────────────────────
@@ -294,6 +347,35 @@ async function autoRemediate(state) {
     }
   }
 
+  // EFICIÊNCIA: erros de extração > 50 → reset para reprocessar
+  if ((state.efficiency?.extraction_error_count || 0) > 50) {
+    const { data } = await supabase
+      .from('articles')
+      .update({ extraction_status: 'pending', extracted_at: null })
+      .eq('extraction_status', 'error')
+      .not('content', 'is', null).neq('content', '')
+      .select('id')
+    if (data?.length > 0) {
+      actions.push(`[EFF] Reset ${data.length} artigos error→pending (extrator com alta taxa de falha)`)
+      state.extraction.articles_pending += data.length
+    }
+  }
+
+  // EFICIÊNCIA: crawl_failed muito alto (> 30% do total) → reset parcial (500 mais antigos)
+  if ((state.efficiency?.crawl_fail_rate || 0) > 30 && state.sources.propmark_crawl_failed > 500) {
+    const { data } = await supabase
+      .from('articles')
+      .update({ extraction_status: null, content: null })
+      .eq('source_name', 'propmark')
+      .eq('extraction_status', 'crawl_failed')
+      .order('created_at', { ascending: true })
+      .limit(500)
+      .select('id')
+    if (data?.length > 0) {
+      actions.push(`[EFF] Reset ${data.length} artigos crawl_failed mais antigos (taxa=${state.efficiency.crawl_fail_rate}%) → nova tentativa`)
+    }
+  }
+
   return actions
 }
 
@@ -353,6 +435,22 @@ function buildHealthReport(state) {
   // Alerta para dados de agência possivelmente desatualizados (nenhuma validação recente)
   if (state.brands.agency_validation_pending > 10) {
     gaps.push(`[OBJ3] ${state.brands.agency_validation_pending} itens pendentes na fila de validação de agência`)
+  }
+
+  // EFICIÊNCIA — Métricas de qualidade do pipeline
+  if (state.efficiency) {
+    if (state.efficiency.crawl_fail_rate > 20) {
+      gaps.push(`[EFF] Taxa de crawl_failed: ${state.efficiency.crawl_fail_rate}% dos artigos Propmark não conseguiram conteúdo`)
+    }
+    if (state.efficiency.extraction_ok_rate < 60 && state.efficiency.articles_with_content > 100) {
+      gaps.push(`[EFF] Taxa de extração: apenas ${state.efficiency.extraction_ok_rate}% dos artigos com conteúdo foram extraídos com sucesso`)
+    }
+    if (state.efficiency.extraction_error_count > 100) {
+      gaps.push(`[EFF] ${state.efficiency.extraction_error_count} artigos com status=error bloqueando extração (serão resetados na próxima remediação)`)
+    }
+    if (state.efficiency.editions_extracted_pct < 10 && state.extraction.editions_pending > 1000) {
+      gaps.push(`[EFF] Edições M&M: apenas ${state.efficiency.editions_extracted_pct}% extraídas — pipeline de edições pode estar travado`)
+    }
   }
 
   // OBJ 4 — Motor preditivo
@@ -453,6 +551,9 @@ async function runOrchestrator({ dry_run = false, full = false, onProgress } = {
   console.log(`[orchestrator] OBJ2 extração: pending=${state.extraction.articles_pending} edicoes=${state.extraction.editions_pending} history=${state.extraction.agency_history} leaders=${state.extraction.leaders} orfaos=${state.extraction.orphan_history}`)
   console.log(`[orchestrator] OBJ3 marcas: ${state.brands.brands_with_history}/${state.brands.total_brands} com histórico (${state.brands.coverage_pct}%)`)
   console.log(`[orchestrator] OBJ4 preditivo: sinais_6h=${state.predictive.signal_events_fresh} sinais_7d=${state.predictive.signal_events_recent} marcas_com_sinais=${state.predictive.brands_with_signals}`)
+  if (state.efficiency) {
+    console.log(`[orchestrator] EFF crawl_fail=${state.efficiency.crawl_fail_rate}% extraction_ok=${state.efficiency.extraction_ok_rate}% errors=${state.efficiency.extraction_error_count} editions_pct=${state.efficiency.editions_extracted_pct}%`)
+  }
 
   // 2. Auto-remediações
   const remediated = dry_run ? [] : await autoRemediate(state)
@@ -484,6 +585,7 @@ async function runOrchestrator({ dry_run = false, full = false, onProgress } = {
       obj2_extraction: state.extraction.articles_pending === 0 && state.extraction.editions_pending === 0,
       obj3_brands:     state.brands.coverage_pct >= 50,
       obj4_predictive: state.predictive.signal_events_fresh > 0,
+      efficiency_ok:   (state.efficiency?.crawl_fail_rate || 0) < 20 && (state.efficiency?.extraction_ok_rate || 100) >= 60,
     },
   }
 
@@ -507,7 +609,20 @@ async function runOrchestrator({ dry_run = false, full = false, onProgress } = {
       report.executed.push(task.agent)
       report.results[task.agent] = result
       done.add(task.agent)
-      console.log(`[orchestrator] ✓ ${task.agent}:`, JSON.stringify(result))
+
+      // Verificação de resultado: detecta se o agente não fez progresso (possível ineficiência)
+      const noProgress = (
+        (task.agent === 'recrawl_propmark' && result?.ok === 0 && (result?.total || 0) > 0) ||
+        (task.agent === 'extract_articles'  && result?.processed === 0 && (result?.skipped || 0) === 0) ||
+        (task.agent === 'capture_signals'   && result?.events_saved === 0) ||
+        (task.agent === 'crawl_media'       && result?.articles_saved === 0)
+      )
+      if (noProgress) {
+        console.warn(`[orchestrator] ⚠ ${task.agent}: nenhum progresso detectado — possível problema no agente`)
+        report.errors.push({ agent: task.agent, error: 'Sem progresso — agente pode estar com problemas' })
+      } else {
+        console.log(`[orchestrator] ✓ ${task.agent}:`, JSON.stringify(result))
+      }
     } catch (e) {
       report.errors.push({ agent: task.agent, error: e.message })
       console.error(`[orchestrator] ✗ ${task.agent}: ${e.message}`)
@@ -525,6 +640,7 @@ async function runOrchestrator({ dry_run = false, full = false, onProgress } = {
     obj2_extraction: stateAfter.extraction.articles_pending === 0,
     obj3_brands:     stateAfter.brands.coverage_pct >= 50,
     obj4_predictive: stateAfter.predictive.signal_events_fresh > 0,
+    efficiency_ok:   (stateAfter.efficiency?.crawl_fail_rate || 0) < 20 && (stateAfter.efficiency?.extraction_ok_rate || 100) >= 60,
   }
 
   console.log(`[orchestrator] ■ Fim. Restantes: ${report.remaining_items} | OBJ1:${report.health_after.obj1_sources} OBJ2:${report.health_after.obj2_extraction} OBJ3:${report.health_after.obj3_brands} OBJ4:${report.health_after.obj4_predictive}`)

@@ -46,14 +46,39 @@ const running = {
   corporateSearch: false,
 }
 
+// Timestamp de início por agente (para watchdog detectar flags travadas)
+const runningStartedAt = {}
+
+// Timeout máximo em ms por agente (deve corresponder ao withTimeout de cada job)
+const AGENT_TIMEOUTS_MS = {
+  recrawl:         14 * 60 * 1000,
+  media:           30 * 60 * 1000,
+  extract:          8 * 60 * 1000,
+  editions:        45 * 60 * 1000,
+  executives:      60 * 60 * 1000,
+  signals:         30 * 60 * 1000,
+  currentAgency:   45 * 60 * 1000,
+  corporateSearch: 60 * 60 * 1000,
+}
+
 function log(tag, msg) {
   console.log(`[scheduler:${tag}] ${new Date().toISOString().slice(0,19)} ${msg}`)
+}
+
+function markRunning(agent) {
+  running[agent] = true
+  runningStartedAt[agent] = Date.now()
+}
+
+function markDone(agent) {
+  running[agent] = false
+  delete runningStartedAt[agent]
 }
 
 // ─── Agente 1: Recrawl Propmark (a cada 15min, 5 concurrent, 300ms/req) ──────
 cron.schedule('*/15 * * * *', async () => {
   if (running.recrawl) { log('recrawl', 'Já em execução, pulando'); return }
-  running.recrawl = true
+  markRunning('recrawl')
   log('recrawl', 'Iniciando recrawl Propmark sem conteúdo')
   await withTimeout(async () => {
   try {
@@ -111,7 +136,7 @@ cron.schedule('*/15 * * * *', async () => {
   } catch (e) {
     log('recrawl', `Erro: ${e.message}`)
   } finally {
-    running.recrawl = false
+    markDone('recrawl')
   }
   }, 14 * 60 * 1000, 'recrawl')
 })
@@ -120,7 +145,7 @@ cron.schedule('*/15 * * * *', async () => {
 // Inclui: Exame, Valor Econômico, Meio & Mensagem, Adnews
 cron.schedule('0 */4 * * *', async () => {
   if (running.media) { log('media', 'Já em execução, pulando'); return }
-  running.media = true
+  markRunning('media')
   log('media', 'Iniciando crawl Exame + Valor + M&M + Adnews')
   await withTimeout(async () => {
     try {
@@ -130,7 +155,7 @@ cron.schedule('0 */4 * * *', async () => {
     } catch (e) {
       log('media', `Erro: ${e.message}`)
     } finally {
-      running.media = false
+      markDone('media')
     }
   }, 30 * 60 * 1000, 'media')
 })
@@ -138,7 +163,7 @@ cron.schedule('0 */4 * * *', async () => {
 // ─── Agente 2: Extração de Artigos (a cada 10min, batch de 2000) ─────────────
 cron.schedule('*/10 * * * *', async () => {
   if (running.extract) { log('extract', 'Já em execução, pulando'); return }
-  running.extract = true
+  markRunning('extract')
   log('extract', 'Iniciando extração de artigos pendentes')
   await withTimeout(async () => {
     try {
@@ -148,7 +173,7 @@ cron.schedule('*/10 * * * *', async () => {
     } catch (e) {
       log('extract', `Erro: ${e.message}`)
     } finally {
-      running.extract = false
+      markDone('extract')
     }
   }, 8 * 60 * 1000, 'extract')
 })
@@ -156,7 +181,7 @@ cron.schedule('*/10 * * * *', async () => {
 // ─── Agente 2: Extração de Edições M&M (a cada 6h) ──────────────────────────
 cron.schedule('15 */6 * * *', async () => {
   if (running.editions) { log('editions', 'Já em execução, pulando'); return }
-  running.editions = true
+  markRunning('editions')
   log('editions', 'Iniciando extração de edições M&M pendentes')
   await withTimeout(async () => {
     try {
@@ -166,7 +191,7 @@ cron.schedule('15 */6 * * *', async () => {
     } catch (e) {
       log('editions', `Erro: ${e.message}`)
     } finally {
-      running.editions = false
+      markDone('editions')
     }
   }, 45 * 60 * 1000, 'editions')
 })
@@ -175,7 +200,7 @@ cron.schedule('15 */6 * * *', async () => {
 cron.schedule('0 3 * * *', async () => {
   if (!process.env.PDL_API_KEY) { log('executives', 'PDL_API_KEY não configurada, pulando'); return }
   if (running.executives) { log('executives', 'Já em execução, pulando'); return }
-  running.executives = true
+  markRunning('executives')
   log('executives', 'Iniciando enriquecimento de executivos via PDL')
   await withTimeout(async () => {
     try {
@@ -185,7 +210,7 @@ cron.schedule('0 3 * * *', async () => {
     } catch (e) {
       log('executives', `Erro: ${e.message}`)
     } finally {
-      running.executives = false
+      markDone('executives')
     }
   }, 60 * 60 * 1000, 'executives')
 })
@@ -194,7 +219,7 @@ cron.schedule('0 3 * * *', async () => {
 cron.schedule('0 2,6,10,14,18,22 * * *', async () => {
   if (!process.env.ANTHROPIC_API_KEY) { log('signals', 'ANTHROPIC_API_KEY não configurada, pulando'); return }
   if (running.signals) { log('signals', 'Já em execução, pulando'); return }
-  running.signals = true
+  markRunning('signals')
   log('signals', 'Iniciando captura de sinais')
   await withTimeout(async () => {
     try {
@@ -204,7 +229,7 @@ cron.schedule('0 2,6,10,14,18,22 * * *', async () => {
     } catch (e) {
       log('signals', `Erro: ${e.message}`)
     } finally {
-      running.signals = false
+      markDone('signals')
     }
   }, 30 * 60 * 1000, 'signals')
 })
@@ -216,7 +241,7 @@ cron.schedule('0 8,20 * * *', async () => {
   if (!process.env.ANTHROPIC_API_KEY) { log('current-agency', 'ANTHROPIC_API_KEY não configurada, pulando'); return }
   if (!process.env.TAVILY_API_KEY)    { log('current-agency', 'TAVILY_API_KEY não configurada, pulando'); return }
   if (running.currentAgency) { log('current-agency', 'Já em execução, pulando'); return }
-  running.currentAgency = true
+  markRunning('currentAgency')
   log('current-agency', 'Iniciando validação de agências atuais')
   await withTimeout(async () => {
     try {
@@ -226,7 +251,7 @@ cron.schedule('0 8,20 * * *', async () => {
     } catch (e) {
       log('current-agency', `Erro: ${e.message}`)
     } finally {
-      running.currentAgency = false
+      markDone('currentAgency')
     }
   }, 45 * 60 * 1000, 'current-agency')
 })
@@ -237,7 +262,7 @@ cron.schedule('0 8,20 * * *', async () => {
 cron.schedule('30 1,9,17 * * *', async () => {
   if (!process.env.TAVILY_API_KEY) { log('corporate-search', 'TAVILY_API_KEY não configurada, pulando'); return }
   if (running.corporateSearch) { log('corporate-search', 'Já em execução, pulando'); return }
-  running.corporateSearch = true
+  markRunning('corporateSearch')
   log('corporate-search', 'Iniciando busca corporativa por entidades')
   await withTimeout(async () => {
     try {
@@ -247,17 +272,43 @@ cron.schedule('30 1,9,17 * * *', async () => {
     } catch (e) {
       log('corporate-search', `Erro: ${e.message}`)
     } finally {
-      running.corporateSearch = false
+      markDone('corporateSearch')
     }
   }, 60 * 60 * 1000, 'corporate-search')
+})
+
+// ─── Watchdog: reseta flags de agentes travados (a cada 30min) ───────────────
+// Se um agente ainda está marcado como "running" muito além do seu timeout,
+// significa que o finally nunca executou (bug, crash, hang). O watchdog reseta
+// a flag para o próximo ciclo do cron poder disparar normalmente.
+cron.schedule('*/30 * * * *', () => {
+  const now = Date.now()
+  const GRACE_MS = 5 * 60 * 1000 // 5min de margem além do timeout declarado
+  for (const [agent, timeoutMs] of Object.entries(AGENT_TIMEOUTS_MS)) {
+    if (running[agent] && runningStartedAt[agent]) {
+      const elapsed = now - runningStartedAt[agent]
+      if (elapsed > timeoutMs + GRACE_MS) {
+        log('watchdog', `⚠ ${agent} travado há ${Math.round(elapsed / 60000)}min (limite: ${Math.round(timeoutMs / 60000)}min) — resetando flag`)
+        markDone(agent)
+      }
+    }
+  }
 })
 
 // ─── Orquestrador: verificação a cada hora ───────────────────────────────────
 // Verifica o estado do pipeline e executa o que estiver pendente
 let orchRunning = false
+let orchStartedAt = null
 cron.schedule('0 * * * *', async () => {
+  // Watchdog inline para o orquestrador (timeout 50min + 5min grace)
+  if (orchRunning && orchStartedAt && (Date.now() - orchStartedAt > 55 * 60 * 1000)) {
+    log('watchdog', '⚠ Orquestrador travado — resetando flag')
+    orchRunning = false
+    orchStartedAt = null
+  }
   if (orchRunning) { log('orch', 'Já em execução, pulando'); return }
   orchRunning = true
+  orchStartedAt = Date.now()
   log('orch', 'Verificando pipeline...')
   await withTimeout(async () => {
     try {
@@ -272,6 +323,7 @@ cron.schedule('0 * * * *', async () => {
       log('orch', `Erro: ${e.message}`)
     } finally {
       orchRunning = false
+      orchStartedAt = null
     }
   }, 50 * 60 * 1000, 'orch')
 })
