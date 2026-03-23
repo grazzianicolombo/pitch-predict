@@ -19,7 +19,7 @@ const agentLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hora
   max: 5,
   keyGenerator: (req) => req.user?.id || req.ip,
-  validate: { ip: false }, // prefere user ID; fallback a req.ip é intencional
+  validate: { keyGeneratorIpFallback: false }, // prefere user ID; fallback a req.ip é intencional
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Limite de execuções de agente atingido (5/hora).' },

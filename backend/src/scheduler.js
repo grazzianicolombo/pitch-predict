@@ -113,6 +113,7 @@ cron.schedule('*/15 * * * *', async () => {
   } finally {
     running.recrawl = false
   }
+  }, 14 * 60 * 1000, 'recrawl')
 })
 
 // ─── Agente 3: Busca em Mídia de Negócios (a cada 4h) ───────────────────────

@@ -10,7 +10,7 @@ const aiLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 10,
   keyGenerator: (req) => req.user?.id || req.ip,
-  validate: { ip: false }, // prefere user ID; fallback a req.ip é intencional
+  validate: { keyGeneratorIpFallback: false }, // prefere user ID; fallback a req.ip é intencional
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Limite de predições atingido (10/hora). Aguarde e tente novamente.' },
