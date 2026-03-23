@@ -81,17 +81,6 @@ function isSafeUrl(rawUrl) {
   }
 
   // Bloqueia IPs literais privados/reservados (RFC 1918, loopback, link-local)
-  // Regex cobre os blocos mais comuns sem bibliotecas extras
-  const PRIVATE_IP = /^(
-    127\.|                          # loopback
-    10\.|                           # RFC 1918
-    192\.168\.|                     # RFC 1918
-    172\.(1[6-9]|2\d|3[01])\.|     # RFC 1918
-    169\.254\.|                     # link-local
-    ::1$|                           # IPv6 loopback
-    fc00:|fd                        # IPv6 ULA
-  )/x
-  // Versão sem flag /x (não suportada em JS):
   const PRIVATE_RE = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|::1$|fc00:|fd)/
   if (PRIVATE_RE.test(hostname)) {
     return { ok: false, error: 'Host não permitido (IP privado ou reservado)' }
