@@ -65,17 +65,18 @@ app.use(express.urlencoded({ extended: true }))
 const _csrfSecret = process.env.CSRF_SECRET || crypto.randomBytes(32).toString('hex')
 
 const { generateCsrfToken, doubleCsrfProtection } = doubleCsrf({
-  getSecret:            () => _csrfSecret,
-  cookieName:           'pp_csrf',
+  getSecret:             () => _csrfSecret,
+  getSessionIdentifier:  (req) => req.ip || '',  // v4: obrigatório — vincula token ao IP do cliente
+  cookieName:            'pp_csrf',
   cookieOptions: {
     httpOnly: false,    // deve ser legível pelo JS do frontend para envio no header
     sameSite: 'strict',
     secure:   process.env.NODE_ENV === 'production',
     path:     '/',
   },
-  getTokenFromRequest:  (req) => req.headers['x-csrf-token'],
-  size:                 64,
-  ignoredMethods:       ['GET', 'HEAD', 'OPTIONS'],
+  getCsrfTokenFromRequest: (req) => req.headers['x-csrf-token'],  // v4: renomeado de getTokenFromRequest
+  size:                  64,
+  ignoredMethods:        ['GET', 'HEAD', 'OPTIONS'],
 })
 
 // Endpoint público para o frontend obter o token CSRF
