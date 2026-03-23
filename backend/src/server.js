@@ -149,6 +149,16 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Rota não encontrada' })
 })
 
+// ── Tratamento de erros não capturados — evita crash silencioso ──────────────
+process.on('uncaughtException', (err) => {
+  console.error('[server] uncaughtException:', err.message, err.stack)
+  // Não encerra o processo — Railway reinicia, mas o loop de crash é evitado
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandledRejection:', reason)
+})
+
 app.listen(PORT, () => {
   console.log(`Backend rodando em http://localhost:${PORT}`)
   // Relança jobs que estavam rodando antes do restart

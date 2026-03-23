@@ -2,5 +2,8 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "node src/server.js"
+startCommand = "sh start.sh"
 restartPolicyType = "always"
+restartPolicyMaxRetries = 10
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30
