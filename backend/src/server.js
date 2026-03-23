@@ -64,7 +64,7 @@ app.use(express.urlencoded({ extended: true }))
 // Em dev sem CSRF_SECRET: gera um segredo por processo (tokens expiram no restart).
 const _csrfSecret = process.env.CSRF_SECRET || crypto.randomBytes(32).toString('hex')
 
-const { generateToken, doubleCsrfProtection } = doubleCsrf({
+const { generateCsrfToken, doubleCsrfProtection } = doubleCsrf({
   getSecret:            () => _csrfSecret,
   cookieName:           'pp_csrf',
   cookieOptions: {
@@ -80,7 +80,7 @@ const { generateToken, doubleCsrfProtection } = doubleCsrf({
 
 // Endpoint público para o frontend obter o token CSRF
 app.get('/api/auth/csrf', (req, res) => {
-  res.json({ token: generateToken(req, res) })
+  res.json({ token: generateCsrfToken(req, res) })
 })
 
 // Endpoints isentos de CSRF (pré-autenticação ou fluxo de reset por token)
