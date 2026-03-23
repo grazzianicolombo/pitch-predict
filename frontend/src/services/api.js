@@ -22,7 +22,7 @@ export async function initCsrfToken() {
 }
 initCsrfToken()
 
-// ─── Response interceptor: auto-refresh on 401 ───────────────────────────────
+// ─── Response interceptors ────────────────────────────────────────────────────
 let _refreshing = false
 let _queue = []
 
@@ -35,6 +35,22 @@ api.interceptors.response.use(
   res => res,
   async error => {
     const original = error.config
+
+    // ── 403 CSRF: renova token e retenta uma vez ───────────────────────────────
+    // Acontece quando o backend reinicia e gera novo CSRF_SECRET (token em memória
+    // fica desatualizado). Renovar o token e reenviar resolve silenciosamente.
+    if (
+      error.response?.status === 403 &&
+      error.response?.data?.error?.includes('CSRF') &&
+      !original._csrfRetry
+    ) {
+      original._csrfRetry = true
+      await initCsrfToken()
+      original.headers['X-CSRF-Token'] = api.defaults.headers.common['X-CSRF-Token']
+      return api(original)
+    }
+
+    // ── 401: renova access token via refresh cookie ────────────────────────────
     // Não tenta refresh para o próprio endpoint de refresh ou login (evita loop)
     if (
       error.response?.status !== 401 ||
