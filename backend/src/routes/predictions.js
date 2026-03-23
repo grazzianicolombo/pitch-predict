@@ -55,7 +55,7 @@ router.get('/dashboard', async (req, res) => {
   const NOW_YEAR = new Date().getFullYear()
   const NOW_MONTH = new Date().getMonth() + 1
 
-  // 1. Carrega dados em paralelo: histórico, brands, líderes, pesos dos sinais, signal_events
+  // 1. Carrega dados em paralelo: histórico, brands, líderes, pesos dos sinais, signal_events, agências canônicas
   const [
     { data: history, error: hErr },
     { data: brandsData },
@@ -63,6 +63,7 @@ router.get('/dashboard', async (req, res) => {
     { data: signalDefs },
     { data: signalEvents },
     { data: scopenData },
+    { data: agencyProfiles },
   ] = await Promise.all([
     supabase.from('agency_history')
       .select('brand_id, agency, scope, status, year_start, month_start, year_end, month_end, pitch_type, confidence')
@@ -72,7 +73,27 @@ router.get('/dashboard', async (req, res) => {
     supabase.from('collected_fields').select('signal_key, weight, active').not('signal_key', 'is', null),
     supabase.from('signal_events').select('brand_id, signal_key, signal_name, weight_applied, evidence_text, captured_at, expires_at'),
     supabase.from('scopen_data').select('brand_id, brand_name, year, satisfaction_score, review_intent, review_probability'),
+    supabase.from('agency_profiles').select('name'),
   ])
+
+  // Normaliza nomes de agência para os nomes canônicos do menu Agências.
+  // Resolve aliases históricos (ex: "Leo Burnett Tailormade" → "Leo"):
+  //  1. Match exato (case-insensitive)
+  //  2. Nome canônico é prefixo do nome bruto  → "Leo" é prefixo de "Leo Burnett Tailormade"
+  //  3. Nome bruto é prefixo do nome canônico
+  //  Se sem match: retorna o nome bruto (backward-compat)
+  const _canonicals = (agencyProfiles || []).map(a => ({ canonical: a.name, lower: a.name.toLowerCase().trim() }))
+  function normalizeAgency(raw) {
+    if (!raw) return raw
+    const rawLow = raw.toLowerCase().trim()
+    const exact = _canonicals.find(({ lower }) => lower === rawLow)
+    if (exact) return exact.canonical
+    const prefix = _canonicals.find(({ lower }) => rawLow.startsWith(lower + ' ') || rawLow.startsWith(lower + ','))
+    if (prefix) return prefix.canonical
+    const revPrefix = _canonicals.find(({ lower }) => lower.startsWith(rawLow + ' ') || lower.startsWith(rawLow + ','))
+    if (revPrefix) return revPrefix.canonical
+    return raw
+  }
 
   if (hErr) return res.status(500).json({ error: hErr.message })
 
@@ -122,9 +143,9 @@ router.get('/dashboard', async (req, res) => {
     }
     const g = grouped[key]
     if (row.status === 'active' && !g.current) {
-      g.current = { agency: row.agency, year_start: row.year_start, month_start: row.month_start }
+      g.current = { agency: normalizeAgency(row.agency), year_start: row.year_start, month_start: row.month_start }
     } else if (row.status === 'ended') {
-      g.past.push(row.agency)
+      g.past.push(normalizeAgency(row.agency))
     }
     if (row.pitch_type === 'concorrência') g.pitches++
   }

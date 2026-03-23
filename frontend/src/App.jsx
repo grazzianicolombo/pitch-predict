@@ -19,6 +19,12 @@ import './App.css'
 
 const NAV_BASE = [
   {
+    section: 'Predição',
+    items: [
+      { to: '/predictions', label: 'Pitch Predict', icon: '◈' },
+    ]
+  },
+  {
     section: 'Inteligência',
     items: [
       { to: '/brands',    label: 'Marcas',    icon: '◈' },
@@ -30,20 +36,12 @@ const NAV_BASE = [
     section: 'Modelo',
     items: [
       { to: '/fields',    label: 'Sinais',    icon: '◎' },
-      { to: '/variables', label: 'Variáveis', icon: '⊘' },
-    ]
-  },
-  {
-    section: 'Predição',
-    items: [
-      { to: '/predictions', label: 'Pitch Predict', icon: '◈' },
     ]
   },
   {
     section: 'Sistema',
     items: [
       { to: '/pipeline',   label: 'Status',        icon: '⟳' },
-      { to: '/validation', label: 'Validação',     icon: '⊛' },
       { to: '/setup',      label: 'Configurações', icon: '⊙' },
     ]
   }
@@ -238,7 +236,7 @@ function AppLayout() {
         <Topbar />
         <div className="main-content">
           <Routes>
-            <Route path="/"           element={<Navigate to="/brands" replace />} />
+            <Route path="/"           element={<Navigate to="/predictions" replace />} />
             <Route path="/brands"     element={<Brands />} />
             <Route path="/agencies"   element={<Agencies />} />
             <Route path="/sources"    element={<Sources />} />
