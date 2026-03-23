@@ -6,7 +6,7 @@
           {
             "type": "command",
             "statusMessage": "Sincronizando com GitHub (Railway + Vercel)...",
-            "command": "cd /Users/tennet/Claude/pitch-predict && if ! git diff --quiet || ! git diff --staged --quiet || [ -n \"$(git ls-files --others --exclude-standard 2>/dev/null)\" ]; then git add -A && git commit -m \"auto: session update $(date '+%d/%m/%Y %H:%M')\" && TOKEN=$(gh auth token 2>/dev/null) && git remote set-url origin \"https://grazzianicolombo:${TOKEN}@github.com/grazzianicolombo/pitch-predict.git\" && git push origin main && echo '{\"systemMessage\": \"✅ GitHub atualizado — Railway e Vercel fazendo deploy automaticamente\"}' || echo '{\"systemMessage\": \"⚠️ Push falhou — verifique credenciais GitHub\"}'; else echo '{\"systemMessage\": \"✅ Nada para sincronizar — código já está atualizado no GitHub\"}'; fi",
+            "command": "cd /home/user/pitch-predict && if ! git diff --quiet || ! git diff --staged --quiet || [ -n \"$(git ls-files --others --exclude-standard 2>/dev/null)\" ]; then git add -A && git commit -m \"auto: session update $(date '+%d/%m/%Y %H:%M')\" && TOKEN=$(gh auth token 2>/dev/null) && git remote set-url origin \"https://grazzianicolombo:${TOKEN}@github.com/grazzianicolombo/pitch-predict.git\" && git push origin main && echo '{\"systemMessage\": \"✅ GitHub atualizado — Railway e Vercel fazendo deploy automaticamente\"}' || echo '{\"systemMessage\": \"⚠️ Push falhou — verifique credenciais GitHub\"}'; else echo '{\"systemMessage\": \"✅ Nada para sincronizar — código já está atualizado no GitHub\"}'; fi",
             "timeout": 60
           }
         ]
