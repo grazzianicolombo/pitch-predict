@@ -104,6 +104,7 @@ app.use('/api', rateLimit({
   windowMs: 60 * 1000,  // 1 minuto
   max: 300,
   keyGenerator: (req) => req.headers.authorization?.slice(-20) || req.ip,
+  validate: { ip: false }, // keyGenerator usa req.user/token primeiro; fallback a req.ip é intencional
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => req.path === '/health',
