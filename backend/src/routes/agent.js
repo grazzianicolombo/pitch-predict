@@ -944,9 +944,9 @@ router.get('/capture-signals/stats', async (req, res) => {
 // Retorna o estado atual do pipeline sem executar nada (dry_run)
 router.get('/orchestrator/status', async (req, res) => {
   try {
-    const { getPipelineState, buildRunPlan } = require('../agents/orchestrator')
+    const { getPipelineState, buildHealthReport } = require('../agents/orchestrator')
     const state = await getPipelineState()
-    const { tasks, gaps } = buildRunPlan(state)
+    const { tasks, gaps } = buildHealthReport(state)
     res.json({
       state,
       gaps,
