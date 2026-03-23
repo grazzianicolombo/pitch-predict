@@ -13,7 +13,7 @@
 const express      = require('express')
 const router       = express.Router()
 const { createClient } = require('@supabase/supabase-js')
-const { Resend }   = require('resend')
+const nodemailer   = require('nodemailer')
 const rateLimit    = require('express-rate-limit')
 const { requireAuth, requireRole } = require('../lib/auth')
 const { dbError } = require('../lib/routeHelpers')
@@ -100,12 +100,23 @@ function getUserSupabase(accessToken) {
   })
 }
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+const mailer = nodemailer.createTransport({
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+})
 
 async function sendEmail({ to, subject, html }) {
-  const from = process.env.EMAIL_FROM || 'Pitch Predict <noreply@pitchpredict.com.br>'
-  const { error } = await resend.emails.send({ from, to, subject, html })
-  if (error) throw new Error(error.message)
+  return mailer.sendMail({
+    from: `"Pitch Predict" <${process.env.SMTP_USER}>`,
+    to,
+    subject,
+    html,
+  })
 }
 
 // ─── Login ───────────────────────────────────────────────────────────────────
