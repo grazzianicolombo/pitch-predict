@@ -34,6 +34,8 @@ export default function AuthCallback() {
 
   useEffect(() => {
     const { access_token, type: t, error } = parseHash()
+    // Remove o hash da URL imediatamente para evitar vazamento do token via Referer
+    window.history.replaceState(null, '', window.location.pathname)
     if (error) { setMsg(error); setStep('error'); return }
     if (!access_token || !['invite', 'recovery'].includes(t)) {
       setMsg('Link inválido ou expirado.')
@@ -53,9 +55,16 @@ export default function AuthCallback() {
     setSaving(true)
     try {
       await api.post('/auth/set-password', { token, password })
+      // Limpa o hash da URL para evitar vazamento do token via Referer
+      window.history.replaceState(null, '', window.location.pathname)
       setStep('success')
     } catch (err) {
-      setMsg(err?.response?.data?.error || 'Erro ao definir senha. Tente novamente.')
+      const status = err?.response?.status
+      if (status === 401) {
+        setMsg('Este link expirou ou já foi utilizado. Solicite um novo link ao administrador.')
+      } else {
+        setMsg(err?.response?.data?.error || 'Erro ao definir senha. Tente novamente.')
+      }
     } finally {
       setSaving(false)
     }

@@ -1,4 +1,4 @@
-const { dbError } = require('../lib/routeHelpers')
+const { dbError, isSafeUrl } = require('../lib/routeHelpers')
 const express  = require('express')
 const router   = express.Router()
 const supabase = require('../lib/supabase')
@@ -342,6 +342,10 @@ router.put('/domains/:id', async (req, res) => {
 
   const { active } = req.body
   if (typeof active !== 'boolean') return res.status(400).json({ error: '"active" deve ser boolean' })
+
+  // Valida que a URL do domínio não aponta para endereços internos (anti-SSRF)
+  const urlCheck = isSafeUrl(domain.url)
+  if (!urlCheck.ok) return res.status(400).json({ error: `URL inválida: ${urlCheck.error}` })
 
   // Upsert na tabela sources
   const { error } = await supabase.from('sources').upsert(

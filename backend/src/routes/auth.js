@@ -19,6 +19,16 @@ const { requireAuth, requireRole } = require('../lib/auth')
 const { dbError } = require('../lib/routeHelpers')
 const { securityLog, EVENTS } = require('../lib/securityLog')
 
+// Escapa caracteres HTML para uso seguro em templates de email
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+}
+
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
 const IS_PROD = process.env.NODE_ENV === 'production'
@@ -41,14 +51,14 @@ function setAuthCookies(res, session, remember = true) {
     httpOnly: true,
     secure:   IS_PROD,
     sameSite: 'strict',
-    path:     '/api/auth/refresh', // cookie enviado SOMENTE ao endpoint de refresh
+    path:     '/', // path='/' para compatibilidade com proxies reversos (Railway/nginx)
     maxAge:   refreshMaxAge * 1000,
   })
 }
 
 function clearAuthCookies(res) {
   res.clearCookie('pp_access_token',  { httpOnly: true, secure: IS_PROD, sameSite: 'strict', path: '/' })
-  res.clearCookie('pp_refresh_token', { httpOnly: true, secure: IS_PROD, sameSite: 'strict', path: '/api/auth/refresh' })
+  res.clearCookie('pp_refresh_token', { httpOnly: true, secure: IS_PROD, sameSite: 'strict', path: '/' })
 }
 
 // ─── Rate limiters ────────────────────────────────────────────────────────────
@@ -81,6 +91,14 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 )
+
+// Cria cliente Supabase com sessão do usuário (necessário para MFA API)
+function getUserSupabase(accessToken) {
+  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY, {
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  })
+}
 
 const mailer = nodemailer.createTransport({
   host: 'smtp.gmail.com',
@@ -125,6 +143,20 @@ router.post('/login', authLimiter, async (req, res) => {
   if (!profile?.active) {
     securityLog(req, EVENTS.LOGIN_FAILURE, { email, userId: data.user.id, reason: 'account_disabled' })
     return res.status(403).json({ error: 'Usuário desativado' })
+  }
+
+  // Verifica se superadmin tem MFA ativo — se sim, exige 2ª etapa
+  if (profile.role === 'superadmin') {
+    const { data: adminUser } = await supabaseAdmin.auth.admin.getUserById(data.user.id)
+    const verifiedTotp = adminUser?.user?.factors?.find(f => f.factor_type === 'totp' && f.status === 'verified')
+    if (verifiedTotp) {
+      // Armazena sessão temporária (10min) para verificação do TOTP
+      res.cookie('pp_mfa_token', data.session.access_token, {
+        httpOnly: true, secure: IS_PROD, sameSite: 'strict', path: '/', maxAge: 10 * 60 * 1000,
+      })
+      securityLog(req, 'MFA_CHALLENGE_ISSUED', { userId: data.user.id, email })
+      return res.json({ mfa_required: true, factor_id: verifiedTotp.id })
+    }
   }
 
   securityLog(req, EVENTS.LOGIN_SUCCESS, { userId: data.user.id, email })
@@ -269,7 +301,7 @@ router.post('/users', requireAuth, requireRole('superadmin'), async (req, res) =
         <div style="margin-bottom: 24px;">
           <span style="font-size: 22px; font-weight: 800;">Pitch Predict</span>
         </div>
-        <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Olá, ${name}!</h2>
+        <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Olá, ${escapeHtml(name)}!</h2>
         <p style="color: #555; margin-bottom: 24px;">
           Você foi convidado para acessar o <strong>Pitch Predict</strong> — inteligência preditiva para pitchs de agências.
         </p>
@@ -354,7 +386,7 @@ router.post('/forgot-password', passwordLimiter, async (req, res) => {
             </div>
             <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Redefinir senha</h2>
             <p style="color: #555; margin-bottom: 24px;">
-              Olá, ${profile.name}! Recebemos uma solicitação para redefinir sua senha.
+              Olá, ${escapeHtml(profile.name)}! Recebemos uma solicitação para redefinir sua senha.
             </p>
             <a href="${resetUrl}" style="
               display: inline-block; padding: 12px 28px; border-radius: 8px;
@@ -402,6 +434,91 @@ router.post('/change-password', requireAuth, passwordLimiter, async (req, res) =
 
   securityLog(req, EVENTS.PASSWORD_CHANGE, { userId: req.user.id })
   res.json({ ok: true, message: 'Senha alterada com sucesso' })
+})
+
+// ─── MFA (TOTP) ──────────────────────────────────────────────────────────────
+// Apenas para contas superadmin. Usa Supabase MFA API (RFC 6238 / TOTP).
+
+const mfaLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 15,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Muitas tentativas MFA. Aguarde 15 minutos.' },
+})
+
+// POST /api/auth/mfa/enroll — inicia enrollment TOTP (superadmin only)
+router.post('/mfa/enroll', requireAuth, requireRole('superadmin'), async (req, res) => {
+  const userSupabase = getUserSupabase(req.cookies.pp_access_token)
+  const { data, error } = await userSupabase.auth.mfa.enroll({
+    factorType: 'totp', issuer: 'PitchPredict', friendlyName: 'Authenticator',
+  })
+  if (error) return res.status(400).json({ error: error.message })
+  res.json({ factor_id: data.id, qr_code: data.totp.qr_code, secret: data.totp.secret, uri: data.totp.uri })
+})
+
+// POST /api/auth/mfa/verify-enrollment — confirma enrollment com código TOTP
+router.post('/mfa/verify-enrollment', mfaLimiter, requireAuth, requireRole('superadmin'), async (req, res) => {
+  const { factor_id, code } = req.body
+  if (!factor_id || !code) return res.status(400).json({ error: 'factor_id e code obrigatórios' })
+  const userSupabase = getUserSupabase(req.cookies.pp_access_token)
+  const { data: ch, error: chErr } = await userSupabase.auth.mfa.challenge({ factorId: factor_id })
+  if (chErr) return res.status(400).json({ error: chErr.message })
+  const { error: vErr } = await userSupabase.auth.mfa.verify({ factorId: factor_id, challengeId: ch.id, code })
+  if (vErr) return res.status(401).json({ error: 'Código inválido. Verifique o autenticador e tente novamente.' })
+  securityLog(req, 'MFA_ENROLLED', { userId: req.user.id })
+  res.json({ ok: true })
+})
+
+// POST /api/auth/mfa/unenroll — remove fator MFA (superadmin only)
+router.post('/mfa/unenroll', requireAuth, requireRole('superadmin'), async (req, res) => {
+  const { factor_id } = req.body
+  if (!factor_id) return res.status(400).json({ error: 'factor_id obrigatório' })
+  const userSupabase = getUserSupabase(req.cookies.pp_access_token)
+  const { error } = await userSupabase.auth.mfa.unenroll({ factorId: factor_id })
+  if (error) return res.status(400).json({ error: error.message })
+  securityLog(req, 'MFA_UNENROLLED', { userId: req.user.id, factorId: factor_id })
+  res.json({ ok: true })
+})
+
+// POST /api/auth/mfa/login-verify — verifica TOTP na 2ª etapa do login
+router.post('/mfa/login-verify', mfaLimiter, async (req, res) => {
+  const mfaToken = req.cookies?.pp_mfa_token
+  if (!mfaToken) return res.status(401).json({ error: 'Sessão MFA não encontrada. Faça login novamente.' })
+  const { factor_id, code } = req.body
+  if (!factor_id || !code) return res.status(400).json({ error: 'factor_id e code obrigatórios' })
+
+  const userSupabase = getUserSupabase(mfaToken)
+  const { data: ch, error: chErr } = await userSupabase.auth.mfa.challenge({ factorId: factor_id })
+  if (chErr) return res.status(400).json({ error: 'Erro ao criar desafio MFA' })
+
+  const { error: vErr } = await userSupabase.auth.mfa.verify({ factorId: factor_id, challengeId: ch.id, code })
+  if (vErr) {
+    securityLog(req, 'MFA_VERIFY_FAILURE', { reason: vErr.message })
+    return res.status(401).json({ error: 'Código inválido. Tente novamente.' })
+  }
+
+  // Obtém sessão atualizada (AAL2) após verificação MFA
+  const { data: sessionData } = await userSupabase.auth.getSession()
+  if (!sessionData?.session) return res.status(401).json({ error: 'Sessão não encontrada após MFA' })
+
+  const { data: profile } = await supabaseAdmin
+    .from('user_profiles')
+    .select('role, name, active')
+    .eq('user_id', sessionData.session.user.id)
+    .single()
+  if (!profile?.active) return res.status(403).json({ error: 'Usuário desativado' })
+
+  res.clearCookie('pp_mfa_token', { httpOnly: true, secure: IS_PROD, sameSite: 'strict', path: '/' })
+  setAuthCookies(res, sessionData.session, true)
+  securityLog(req, 'MFA_VERIFY_SUCCESS', { userId: sessionData.session.user.id })
+  res.json({
+    user: {
+      id:    sessionData.session.user.id,
+      email: sessionData.session.user.email,
+      name:  profile.name,
+      role:  profile.role,
+    }
+  })
 })
 
 // ─── Atualiza role/status (superadmin) ───────────────────────────────────────

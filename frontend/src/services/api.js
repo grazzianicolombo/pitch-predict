@@ -1,11 +1,26 @@
 import axios from 'axios'
 
+const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/api',
+  baseURL: BASE,
   headers: { 'Content-Type': 'application/json' },
   // Envia cookies httpOnly automaticamente em todas as requisições (CORS com credenciais)
   withCredentials: true,
 })
+
+// ── CSRF token — Double Submit Cookie ─────────────────────────────────────────
+// Busca o token do backend (que seta o cookie pp_csrf) e o armazena em memória
+// para envio como header X-CSRF-Token em todas as requisições de estado.
+export async function initCsrfToken() {
+  try {
+    const { data } = await axios.get(`${BASE}/auth/csrf`, { withCredentials: true })
+    api.defaults.headers.common['X-CSRF-Token'] = data.token
+  } catch {
+    // Falha silenciosa em dev sem backend; token será obtido no próximo request
+  }
+}
+initCsrfToken()
 
 // ─── Response interceptor: auto-refresh on 401 ───────────────────────────────
 let _refreshing = false
@@ -41,11 +56,9 @@ api.interceptors.response.use(
 
     try {
       // O cookie pp_refresh_token é enviado automaticamente (withCredentials)
-      await axios.post(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/auth/refresh`,
-        {},
-        { withCredentials: true }
-      )
+      await axios.post(`${BASE}/auth/refresh`, {}, { withCredentials: true })
+      // Re-fetch CSRF token após refresh (cookie pode ter sido atualizado)
+      await initCsrfToken()
       processQueue(null)
       return api(original)
     } catch (err) {

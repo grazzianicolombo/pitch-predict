@@ -2,6 +2,7 @@ const express = require('express')
 const router  = express.Router()
 const supabase = require('../lib/supabase')
 const { requireValidId, requireValidIds, dbError } = require('../lib/routeHelpers')
+const { dataLog } = require('../lib/securityLog')
 
 function safeUrl(val) {
   if (!val) return null
@@ -66,6 +67,7 @@ router.post('/', async (req, res) => {
     .select()
     .single()
   if (error) return dbError(res, error, 'brands')
+  dataLog(req, 'DATA_CREATE', 'brand', data.id, { name: data.name })
   res.status(201).json(data)
 })
 
@@ -95,6 +97,7 @@ router.put('/:id', requireValidId, async (req, res) => {
     .select()
     .single()
   if (error) return dbError(res, error, 'brands')
+  dataLog(req, 'DATA_UPDATE', 'brand', req.params.id)
   res.json(data)
 })
 
@@ -102,6 +105,7 @@ router.put('/:id', requireValidId, async (req, res) => {
 router.delete('/:id', requireValidId, async (req, res) => {
   const { error } = await supabase.from('brands').delete().eq('id', req.params.id)
   if (error) return dbError(res, error, 'brands')
+  dataLog(req, 'DATA_DELETE', 'brand', req.params.id)
   res.json({ success: true })
 })
 

@@ -107,40 +107,41 @@ router.post('/test/:apiId', async (req, res) => {
     if (apiId === 'anthropic') {
       const Anthropic = require('@anthropic-ai/sdk')
       const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-      const r = await client.messages.create({
+      await client.messages.create({
         model: 'claude-haiku-4-5',
         max_tokens: 10,
         messages: [{ role: 'user', content: 'ok' }]
       })
-      return res.json({ ok: true, model: r.model })
+      return res.json({ ok: true })
     }
 
     if (apiId === 'tavily') {
       const { tavily } = require('@tavily/core')
       const client = tavily({ apiKey: process.env.TAVILY_API_KEY })
-      const r = await client.search('test', { maxResults: 1 })
-      return res.json({ ok: true, results: r.results?.length })
+      await client.search('test', { maxResults: 1 })
+      return res.json({ ok: true })
     }
 
     if (apiId === 'pdl') {
       const https = require('https')
-      const result = await new Promise((resolve, reject) => {
+      const status = await new Promise((resolve, reject) => {
         https.get({
           hostname: 'api.peopledatalabs.com',
           path: '/v5/company/enrich?name=Google',
           headers: { 'X-Api-Key': process.env.PDL_API_KEY }
         }, res => {
-          let body = ''
-          res.on('data', d => body += d)
-          res.on('end', () => resolve(JSON.parse(body)))
+          res.resume() // discard body — never expose API response data
+          res.on('end', () => resolve(res.statusCode))
         }).on('error', reject)
       })
-      return res.json({ ok: result.status === 200, status: result.status, company: result.display_name })
+      return res.json({ ok: status === 200 })
     }
 
     res.status(400).json({ error: 'API desconhecida' })
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message })
+    // Log internally, never expose error details
+    console.error(`[setup/test] ${apiId}: ${e.message}`)
+    res.status(500).json({ ok: false })
   }
 })
 

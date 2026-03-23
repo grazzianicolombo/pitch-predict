@@ -11,6 +11,8 @@ const cors         = require('cors')
 const helmet       = require('helmet')
 const rateLimit    = require('express-rate-limit')
 const cookieParser = require('cookie-parser')
+const crypto       = require('crypto')
+const { doubleCsrf } = require('csrf-csrf')
 
 const brandsRouter      = require('./routes/brands')
 const sourcesRouter     = require('./routes/sources')
@@ -57,6 +59,45 @@ app.use(cookieParser())
 app.use(express.json({ limit: '2mb' }))
 app.use(express.urlencoded({ extended: true }))
 
+// ── CSRF — Double Submit Cookie (defense-in-depth além do SameSite=Strict) ────
+// Em produção, configure CSRF_SECRET no Doppler para consistência entre restarts.
+// Em dev sem CSRF_SECRET: gera um segredo por processo (tokens expiram no restart).
+const _csrfSecret = process.env.CSRF_SECRET || crypto.randomBytes(32).toString('hex')
+
+const { generateToken, doubleCsrfProtection } = doubleCsrf({
+  getSecret:            () => _csrfSecret,
+  cookieName:           'pp_csrf',
+  cookieOptions: {
+    httpOnly: false,    // deve ser legível pelo JS do frontend para envio no header
+    sameSite: 'strict',
+    secure:   process.env.NODE_ENV === 'production',
+    path:     '/',
+  },
+  getTokenFromRequest:  (req) => req.headers['x-csrf-token'],
+  size:                 64,
+  ignoredMethods:       ['GET', 'HEAD', 'OPTIONS'],
+})
+
+// Endpoint público para o frontend obter o token CSRF
+app.get('/api/auth/csrf', (req, res) => {
+  res.json({ token: generateToken(req, res) })
+})
+
+// Endpoints isentos de CSRF (pré-autenticação ou fluxo de reset por token)
+const CSRF_EXEMPT = ['/auth/login', '/auth/refresh', '/auth/forgot-password', '/auth/set-password', '/auth/mfa/login-verify']
+
+app.use('/api', (req, res, next) => {
+  if (CSRF_EXEMPT.some(p => req.path.startsWith(p))) return next()
+  if (req.path === '/health') return next()
+  doubleCsrfProtection(req, res, (err) => {
+    if (err) {
+      console.warn(`[csrf] Token inválido: ${req.method} ${req.path} IP=${req.ip}`)
+      return res.status(403).json({ error: 'Token CSRF inválido ou ausente' })
+    }
+    next()
+  })
+})
+
 // ── Rate limit global: 300 req/min por usuário autenticado ou IP ──────────────
 // Protege todos os endpoints CRUD de abuso/scraping em massa
 app.use('/api', rateLimit({
@@ -89,6 +130,16 @@ const { autoResume } = require('./lib/autoResume')
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' })
+})
+
+// ── /.well-known/security.txt — RFC 9116 ─────────────────────────────────────
+app.get('/.well-known/security.txt', (req, res) => {
+  res.type('text/plain').send([
+    'Contact: mailto:security@pitchpredict.com.br',
+    'Expires: 2027-01-01T00:00:00.000Z',
+    'Preferred-Languages: pt, en',
+    'Policy: https://pitchpredict.com.br/security-policy',
+  ].join('\n'))
 })
 
 app.use((req, res) => {

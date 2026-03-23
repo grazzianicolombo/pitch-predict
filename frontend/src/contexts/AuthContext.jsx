@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react'
-import api from '../services/api'
+import api, { initCsrfToken } from '../services/api'
 
 const AuthContext = createContext(null)
 
@@ -53,6 +53,7 @@ export function AuthProvider({ children }) {
   async function login(email, password, remember = true) {
     const { data } = await api.post('/auth/login', { email, password, remember })
     // Cookies httpOnly são definidos pelo backend; apenas armazenamos o user no state
+    await initCsrfToken() // atualiza o token CSRF após login
     setUser(data.user)
     startRefreshTimer()
     return data.user

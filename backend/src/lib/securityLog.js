@@ -13,21 +13,28 @@ const supabase = require('./supabase')
 
 // Eventos suportados — enum para evitar strings livres
 const EVENTS = {
+  // Auth
   LOGIN_SUCCESS:          'LOGIN_SUCCESS',
   LOGIN_FAILURE:          'LOGIN_FAILURE',
   LOGOUT:                 'LOGOUT',
   PASSWORD_CHANGE:        'PASSWORD_CHANGE',
   PASSWORD_RESET_REQUEST: 'PASSWORD_RESET_REQUEST',
   PASSWORD_SET:           'PASSWORD_SET',
+  // User management
   USER_CREATED:           'USER_CREATED',
   USER_DELETED:           'USER_DELETED',
   USER_DEACTIVATED:       'USER_DEACTIVATED',
   ROLE_CHANGED:           'ROLE_CHANGED',
+  // Access control
   AUTH_FAILURE:           'AUTH_FAILURE',
   RATE_LIMIT_HIT:         'RATE_LIMIT_HIT',
   UNAUTHORIZED_ACCESS:    'UNAUTHORIZED_ACCESS',
   INVALID_TOKEN:          'INVALID_TOKEN',
   SESSION_EXPIRED:        'SESSION_EXPIRED',
+  // Data audit trail (CRUD)
+  DATA_CREATE:            'DATA_CREATE',
+  DATA_UPDATE:            'DATA_UPDATE',
+  DATA_DELETE:            'DATA_DELETE',
 }
 
 /**
@@ -70,4 +77,20 @@ async function securityLog(req, event, meta = {}) {
     .catch(() => {}) // nunca deixa o processo crashar por causa de log
 }
 
-module.exports = { securityLog, EVENTS }
+/**
+ * Convenience wrapper para eventos de auditoria de dados (CREATE/UPDATE/DELETE).
+ * @param {import('express').Request} req
+ * @param {'DATA_CREATE'|'DATA_UPDATE'|'DATA_DELETE'} action
+ * @param {string} resource  — nome da tabela/recurso (ex: 'brand', 'agency_history')
+ * @param {string|null} resourceId
+ * @param {object} [extra]   — campos adicionais (ex: { name: 'Nike' })
+ */
+function dataLog(req, action, resource, resourceId, extra = {}) {
+  securityLog(req, EVENTS[action] || action, {
+    resource,
+    resourceId,
+    ...extra,
+  })
+}
+
+module.exports = { securityLog, dataLog, EVENTS }
